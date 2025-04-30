@@ -1,0 +1,9 @@
+websockets
+requests
+dashscope
+Pillow
+openai
+mysql-connector
+flask
+selenium
+beautifulsoup4
