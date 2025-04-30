@@ -1,0 +1,341 @@
+import json
+import os
+import dashscope
+import requests
+from PIL import Image
+from io import BytesIO
+from openai import OpenAI
+from spider import *
+import subprocess
+import base64
+from urllib3.exceptions import InsecureRequestWarning
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+from settings import *
+dashscope.api_key = ALIYUN_KEY
+
+def ask_ai(prompt, content, model="qwen-turbo"):
+    BASE_URL = PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"]
+    api_key = PREFIX_TO_ENDPOINT[model.split("-")[0]]["key"]
+    oclient = OpenAI(api_key=api_key, BASE_URL=BASE_URL)
+    if prompt == "":
+        messages = [{"role": "user", "content": content}]
+    else:
+        messages = [{"role": "system", "content": prompt}, {"role": "user", "content": content}]
+    response = oclient.chat.completions.create(
+        model=model,
+        messages=messages,
+        stream=False,
+    )
+    return response.choices[0].message.content
+
+
+def ai(messages,model="qwen-turbo"):
+    BASE_URL = PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"]
+    api_key = PREFIX_TO_ENDPOINT[model.split("-")[0]]["key"]
+    oclient = OpenAI(api_key=api_key, BASE_URL=BASE_URL)
+    response = oclient.chat.completions.create(
+        model=model,
+        messages=messages,
+        stream=False,
+    )
+    return response.choices[0].message.content
+
+class CodeExecutor:
+
+    def __init__(self, model="qwen-turbo", messages=[{"role": "system", "content": "你被赋予使用函数，程序可以连接网络"}]):
+        self.tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "run_py",
+                    "description": "执行python代码，捕捉控制台输出，20秒超时，环境可联网，于未保护的实体机上运行",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "code": {
+                                "description": "python代码",
+                                "type": "string",
+                            },
+                        },
+                        "required": ["code"]
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "send_file",
+                    "description": "生成一个文件下载链接",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "filename": {
+                                "description": "文件名，仅工作目录根目录下",
+                                "type": "string",
+                            },
+                        },
+                        "required": ["filename"]
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "使用搜索引擎搜索网络",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "keyword": {
+                                "description": "关键词",
+                                "type": "string",
+                            },
+                        },
+                        "required": ["content"]
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "visit",
+                    "description": "查看搜索结果或访问链接",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "content": {
+                                "description": "数字序号/链接",
+                                "type": "string",
+                            },
+                        },
+                        "required": ["content"]
+                    },
+                },
+            },
+        ]
+        self.status = 0
+        self.model = model
+        self.messages = messages
+        self.cwd = r".\temp"
+        self.spider = None
+
+    def ai(self):
+        BASE_URL = PREFIX_TO_ENDPOINT[self.model.split("-")[0]]["url"]
+        api_key = PREFIX_TO_ENDPOINT[self.model.split("-")[0]]["key"]
+        oclient = OpenAI(api_key=api_key, BASE_URL=BASE_URL)
+        response = oclient.chat.completions.create(
+            model=self.model,
+            messages=self.messages,
+            stream=False,
+            tools=self.tools
+        )
+        return response.choices[0].message
+
+    def run_code(self, code):
+        try:
+            result = subprocess.run(["python", "-c", code], timeout=20, check=True, text=True, capture_output=True, cwd=self.cwd)
+            return result.stdout
+        except subprocess.TimeoutExpired:
+            return "Process timed out and was terminated."
+        except subprocess.CalledProcessError as e:
+            return f"Command failed with return code {e.returncode}\nError output:\n{e.stderr}"
+
+    def host_file(self, filename):
+        if os.path.exists(rf"{self.cwd}\{filename}"):
+            requests.get(f"https://localhost:4856/sec_check?arg={filename}", verify=False)
+            return f"https://srv.{BASE_URL}:4856/wf_file?filename={filename}"
+        else:
+            return "File not found."
+
+    def append_message(self, content, to_last = False):
+        if to_last:
+            self.messages[-1]["content"].append(content)
+        else:
+            self.messages.append(content)
+
+    def process(self):
+        if self.status == 0:  # 新的开始/无任务需执行
+            result = self.generate()
+
+        elif self.status == 1:  # 用户确认
+            result = self.check_and_run(self.messages[-1]["content"][0]["text"])
+
+        elif self.status == 2:  # 运行函数
+            result = self.run_func()
+            self.messages.append({
+                "role": "tool",
+                "content": result[1],
+                "tool_call_id": self.messages[-1].tool_calls[0].id
+            })
+            result = [result[0]]
+
+        elif self.status == 3:  # 对完成的函数进行生成
+            result = self.generate()
+        return {"return": result, "status": self.status}
+
+    def check_and_run(self, user_input):
+        self.messages.pop()
+        if user_input in ["Y", "y", "yes", "Yes", "YES", "是"]:
+            result = self.run_func()
+            content = result[1]
+            returns = [result[0]]
+
+        elif user_input in ["N", "n", "no", "No", "NO", "否"]:
+            content = "Denied by user."
+            returns = ["--------\n被拒绝\n--------"]
+
+        else:
+            content = f"Denied by user: {user_input}"
+            returns = ["--------" + "\n" + "被拒绝:" + user_input + "\n" + "--------"]
+
+        self.messages.append({
+            "role": "tool",
+            "content": content,
+            "tool_call_id": self.messages[-1].tool_calls[0].id
+        })
+        self.status = 3
+        return returns
+
+    def generate(self):
+        returns = []
+        response = self.ai()
+        self.messages.append(response)
+
+        if response.content != "":
+            returns.append(response.content)
+
+        if response.tool_calls:
+            function = response.tool_calls[0].function
+            name = function.name
+            with open("test.json", "w", encoding="utf-8") as f:
+                f.write(function.arguments)
+            arguments = json.loads(function.arguments)
+
+            if name == "run_py":
+                self.status = 1
+                arg = arguments["code"]
+            elif name == "send_file":
+                self.status = 2
+                arg = arguments["filename"]
+            elif name == "web_search":
+                self.status = 2
+                arg = arguments["keyword"]
+            elif name == "visit":
+                self.status = 2
+                arg = arguments["content"]
+
+            returns.append("--------" + "\n" + f"函数: {name}\n参数: {arg}\n--------")
+
+            if self.status == 1:
+                returns[-1] += "\n是否确认执行? (y/n/(拒绝理由))"
+
+        else:
+            self.status = 0
+
+        return returns
+
+    def run_func(self):
+        response = self.messages[-1]
+        function = response.tool_calls[0].function
+        name = function.name
+        arguments = json.loads(function.arguments)
+
+        if name == "run_py":
+            response_content = self.run_code(arguments["code"])
+            return_text = response_content
+        elif name == "send_file":
+            response_content = self.host_file(arguments["filename"])
+            return_text = response_content
+        elif name == "web_search":
+            self.spider = WebSpider(keywords=[arguments["keyword"]], se="bing", pages=1)
+            self.spider.start_crawling()
+            response_content = self.spider.formatted()
+            return_text = response_content
+        elif name == "visit":
+            try:
+                number = int(arguments["content"])
+                response_content = self.spider.get_page_with_id(number)
+            except:
+                try:
+                    if arguments["content"].startswith("http"):
+                        response_content = get_page_text(arguments["content"])
+                    else:
+                        response_content = "访问搜索结果应输入数字！"
+                except:
+                    response_content = "链接无法访问！"
+            return_text = response_content[:200].replace("\n", " ")
+
+        self.status = 3
+        return ["--------" + "\n" + "输出:" + return_text.rstrip("\n") + "\n" + "--------", response_content.rstrip("\n")]
+
+
+# def voice_gen(text):
+#     result = SpeechSynthesizer.call(model='sambert-zhimiao-emo-v1',
+#                                     text=text,
+#                                     sample_rate=48000,
+#                                     format='wav')
+#     if result.get_audio_data() is not None:
+#         with open('output.wav', 'wb') as f:
+#             f.write(result.get_audio_data())
+
+
+def stt(file_path):
+    task_response = dashscope.audio.asr.Transcription.async_call(
+        model='paraformer-v1',
+        file_urls=[file_path],
+    )
+    transcribe_response = dashscope.audio.asr.Transcription.wait(
+        task=task_response.output.task_id)
+    data = json.loads(str(transcribe_response.output))
+    url = data["results"][0]["transcription_url"]
+    text_json = requests.get(url).json()
+    text = text_json["transcripts"][0]['text']
+    return text
+
+def url_to_b64(url):
+    response = requests.get(url)
+    # 使用BytesIO读取图片内容
+    image = Image.open(BytesIO(response.content))
+
+    # 将图片保存到BytesIO对象，并指定格式
+    img_byte_arr = BytesIO()
+    image_format = image.format  # 获取图像格式，如'PNG', 'JPEG'等
+    image.save(img_byte_arr, format=image_format)
+    
+    # 获取二进制图像数据
+    img_byte_arr = img_byte_arr.getvalue()
+
+    # 对图像数据进行Base64编码
+    img_base64 = base64.b64encode(img_byte_arr).decode('utf-8')
+    return img_base64
+
+def ocr(url):
+    img_base64 = url_to_b64(url)
+    json_data = json.dumps({
+        "base64": img_base64,
+        "options": {
+            "ocr.language": "简体中文",
+            "ocr.angle": True,
+            "ocr.maxSideLen": 99999,
+            "tbpu.parser": "multi_line",
+            "data.format": "text",
+        }
+    })
+    return requests.post('http://127.0.0.1:1224/api/ocr', headers={"Content-Type": "application/json"}, data = json_data).json()["data"]
+
+def emo_detect(img_url, ratio="1:1"):
+    '''返回检测结果 json'''
+    url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/image2video/face-detect"
+    headers = {"Content-Type": "application/json","Authorization": f"Bearer {ALIYUN_KEY}"}
+    data = {"model": "emo-detect-v1","input": {"image_url": img_url}, "parameters": {"ratio": ratio}}
+    detect_result = requests.post(url, headers=headers, data=json.dumps(data)).json()
+    return detect_result
+
+def emo(img_url, audio_url, face_bbox, ext_bbox, style_level="active"):
+    '''返回task_id 字符串'''
+    url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/image2video/video-synthesis/"
+    headers = {"Content-Type": "application/json","Authorization": f"Bearer {ALIYUN_KEY}", "X-DashScope-Async": "enable"}
+    data = {"model": "emo-v1","input": {"image_url": img_url, "audio_url": audio_url, "face_bbox": face_bbox, "ext_bbox": ext_bbox}, "parameters": {"style_level": style_level}}
+    json_data = json.dumps(data)
+    result = requests.post(url, headers=headers, data=json_data).json()
+    return result["output"]["task_id"]
