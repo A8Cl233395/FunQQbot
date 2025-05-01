@@ -8,27 +8,30 @@ import time
 from urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 from settings import *
-in_code_users = []
-private_code_inited = {}
-private_model_cache = {}
-private_message_cache = {}
-username_cache = {}
-groups = {}
+username_cache: dict[int, str] = {}
+groups: dict[int, any] = {}
+users: dict[int, any] = {}
 weather = {"time": 0}
 
-
-result = fetch_db("SELECT * FROM bsettings") # 缓存模型
-for i in result:
-    if i[0][:1] == "p":
-        private_model_cache[int(i[0][1:])] = i[1]
 first_time = False
 model_list_cache = {}
 result = fetch_db("SELECT * FROM mdesc")
 for i in result:
-    model_list_cache[i[0]] = {"name": i[0], "des": i[1], "vision": i[2]}
-print("NO MORE POPEN. NO MORE IF. NO MORE SHIT CODE.")
+    model_list_cache[i[0]] = {"des": i[1], "vision": i[2]}
+print("启动中...")
 
-def messages_to_text(messages, username=""):
+def messages_to_text(messages: list[dict], username: str="") -> tuple[str, bool, str]:
+    """
+    将消息列表转换为文本
+
+    Args:
+        messages: 消息列表
+        username: 用户名
+        
+    Returns:
+        如果username为空,返回转换后的文本
+        否则返回(username + 文本, 是否被@, 原始文本)的元组
+    """
     output_text = ""
     is_mentioned = False
     try:
@@ -67,7 +70,7 @@ def messages_to_text(messages, username=""):
                     output_text += f" @{name}"
                 case "reply":
                     reply_data = get_message(message["data"]["id"])
-                    text = messages_to_text(reply_data)[0]
+                    text = messages_to_text(reply_data)
                     output_text += f" <回复: {text}>"
                 case "face":
                     output_text += " <表情>"
@@ -75,18 +78,19 @@ def messages_to_text(messages, username=""):
                     data = get_foward_messages(message["data"]["id"])
                     text = " "
                     for i in data:
-                        text += messages_to_text(i["message"], i["sender"]["nickname"])[0] + "\n"
+                        text += messages_to_text(i["message"], i["sender"]["nickname"]) + "\n"
                     output_text += f" <合并转发开始>\n{text}\n<合并转发结束>"
                 case "markdown":
                     output_text += f" <markdown: {message['data']['content']}>"
                 case _:
-                    output_text += f" <UNKNOWN>"
+                    output_text += f" <未知>"
                     print("发生错误")
                     print(message)
                     print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-        if username != "":
+        if username:
             return username+ ": " + output_text[1:], is_mentioned, output_text[1:]
-        return output_text[1:], is_mentioned
+        return output_text[1:]
+        
     except Exception as e:
         print("---message_to_text---")
         print(messages)
@@ -94,30 +98,42 @@ def messages_to_text(messages, username=""):
         print(e)
         print("---")
 
-def ai_reply(messages, model, prompt):
-    combined_text = "" # 拼接所有消息
-    for i in messages:
-        combined_text += i + "\n"
-    combined_text += f"{SELF_NAME}: " # 加上机器人名字
-    result = ask_ai(prompt, combined_text, model=model) # 调用大模型
+def ai_reply(messages: list[str], model: str, prompt: str) -> list[str]:
+    """
+    调用AI模型生成回复
+
+    Args:
+        messages: 消息历史列表
+        model: 使用的模型名称
+        prompt: 提示词
+        
+    Returns:
+        回复消息列表
+    """
+    # 拼接所有消息
+    combined_text = "\n".join(messages) + f"{SELF_NAME}: "
+    
+    # 调用大模型
+    result = ask_ai(prompt, combined_text, model=model)
     splited = result.split("<split>")
     for i in range(len(splited)):
         real_text = splited[i]
-        if real_text[:5] == f"{SELF_NAME}: ": # 处理多出来的名字
+        if real_text[:5] == f"{SELF_NAME}：": # 处理多出来的名字
             splited[i] = real_text[5:]
         elif real_text[:6] == f"{SELF_NAME}: ":
             splited[i] = real_text[6:]
         splited[i] = splited[i].strip()
     return splited
 
-def process_first_message_text(messages):
-    """Process only the first message's text content from messages list"""
+def process_first_message_text(messages: list[dict]) -> str:
+    """处理消息列表中的第一个消息文本内容"""
     first_message = messages[0]
-    if first_message.get("type") == "text":  # Check if first message has text content
+    if first_message.get("type") == "text":  # 检查第一个消息是否为文本内容
         return first_message["data"]["text"]
     return ""
 
 class Handle_group_message:
+    """群消息处理类"""
     def __init__(self, group_id):
         self.group_id = group_id
         self.stored_messages = []
@@ -144,13 +160,20 @@ class Handle_group_message:
             ".ping": lambda a, b: self.ping(),
         }
         self.last_time = 0
-        self.delete = True # 阻止删除消息，使用缓存
+        self.delete = True # 阻止删除消息，使用大模型缓存
 
-    async def process(self, messages, username, sender_id):
+    async def process(self, messages: list[dict], username: str, sender_id: int):
+        """
+        处理群消息
+        
+        Args:
+            messages: 消息列表 
+            username: 发送者用户名
+            sender_id: 发送者QQ号
+        """
         message_send = []
         username_cache[sender_id] = username
-        for i in messages: # 缓存原始消息
-            self.original_messages.append(i)
+        self.original_messages.extend(messages) # 记录原始消息
         if len(self.original_messages) > 10: # 缓存消息数量限制（原始）
             self.original_messages = self.original_messages[-10:]
         data = messages_to_text(messages, username)
@@ -165,37 +188,36 @@ class Handle_group_message:
             self.delete = True
             self.stored_messages.append("<时间间隔长>")
         self.last_time = time.time() # 更新最后聊天时间
-        if len(self.stored_messages) > 50 and self.delete:
+        if len(self.stored_messages) > 50 and self.delete: # 超过50条消息清理
             self.stored_messages.pop(0)
-        if data[1]: # 被@
+        # 被提及
+        if data[1]:
             self.delete = False
             result = ai_reply(self.stored_messages, self.model, self.prompt)
-            for i in result:
-                message_send.append(i)
+            message_send.extend(result)
         if plain_text[:1] == ".": # 指令
             if plain_text[:5] in self.mappings:
                 result = self.mappings[plain_text[:5]](plain_text, sender_id)
-                for i in result:
-                    message_send.append(i)
+                message_send.extend(result)
         for i in message_send:
             self.stored_messages.append(f"{SELF_NAME}: {i}")
             await send_group_message(self.group_id, i)
             await asyncio.sleep(0.1)
         
-    def ping(self):
+    def ping(self) -> list[str]:
         return ["Pong!"]
 
-    def stop(self):
+    def stop(self) -> list[str]:
         breakpoint()
         return ["已停止，待手动检查"]
     
-    def tar(self, plain_text):
+    def tar(self, plain_text: str) -> list[str]:
         cards = parse_to_narrative(draw_tarot_cards())
         user_input = plain_text[5:]
         result = ask_ai(f"你是塔罗牌占卜师，这是你抽出的塔罗牌: \n{cards}", user_input, model=self.model)
         return [cards + "\n---\n" + result]
 
-    def luck(self, sender_id):
+    def luck(self, sender_id: int) -> list[str]:
         global weather
         current_time_int = time.time()
         current_time_raw = time.localtime()
@@ -215,20 +237,20 @@ class Handle_group_message:
         result = f"[CQ:at,qq={sender_id}] 你的每日运势从炉管出来了💥\n" + result
         return [result]
 
-    def help(self):
+    def help(self) -> list[str]:
         return [f"https://www.{BASE_URL}/?p=77", "请复制到浏览器打开，时间可能较长"]
 
-    def rst(self):
+    def rst(self) -> list[str]:
         self.stored_messages = []
         return ["已清除聊天记录缓存"]
 
     def init(self):
-        db("INSERT INTO bsettings (owner, model) VALUES (%s, %s)", (f"g{self.group_id}", "qwen-turbo"))
+        db("INSERT INTO bsettings (owner, model) VALUES (%s, %s)", (f"g{self.group_id}", DEFAULT_MODEL))
         db("INSERT INTO prompts (owner, prompt) VALUES (%s, %s)", (f"g{self.group_id}", DEFAULT_PROMPT))
-        self.model = "qwen-turbo"
+        self.model = DEFAULT_MODEL
         self.prompt = DEFAULT_PROMPT
     
-    def vid(self):
+    def vid(self) -> list[str]:
         if self.original_messages[-3]["type"] == "image": #检查图片
             if self.original_messages[-2]["type"] == "file": #检查文件
                 if self.original_messages[-2]["data"]["file"][-4:] in [".wav", ".mp3"]: #检查是否为音频文件
@@ -258,18 +280,18 @@ class Handle_group_message:
         else:
             return ["请发送图片和音频文件"]
 
-    def pmt_reset(self):
+    def pmt_reset(self) -> list[str]:
         db("UPDATE prompts SET prompt = %s WHERE owner = %s", (DEFAULT_PROMPT, f"g{self.group_id}"))
         self.prompt = DEFAULT_PROMPT
         return ["设置成功，默认提示为：" + DEFAULT_PROMPT]
 
-    def pmt_set(self, plain_text):
+    def pmt_set(self, plain_text) -> list[str]:
         user_input = plain_text.replace(".pmt ", "")
         self.prompt = user_input
         db("UPDATE prompts SET prompt = %s WHERE owner = %s", (user_input, f"g{self.group_id}"))
         return ["设置成功"]
 
-    def rdm_use(self):
+    def rdm_use(self) -> list[str]:
         result = fetch_db("SELECT range1, range2 FROM rsettings WHERE owner = %s", (f"g{self.group_id}",))
         if result:
             range1 = result[0][0]
@@ -280,7 +302,7 @@ class Handle_group_message:
             db("INSERT INTO rsettings (owner, range1, range2) VALUES (%s, %s, %s)", (f"g{self.group_id}", 0, 1))
         return [f"{range1} - {range2}之间的随机数: {random.randint(range1, range2)}"]
 
-    def rdm_set(self, plain_text):
+    def rdm_set(self, plain_text) -> list[str]:
         text_split = plain_text.split()
         if len(text_split) == 3:
             db("UPDATE rsettings SET range1 = %s, range2 = %s WHERE owner = %s", (text_split[1], text_split[2], f"g{self.group_id}"))
@@ -288,7 +310,7 @@ class Handle_group_message:
         else:
             return ["设置失败"]
     
-    def mdl(self, plain_text):
+    def mdl(self, plain_text) -> list[str]:
         user_input = plain_text.replace(".mdl ", "")
         if user_input in ["ls", "list", "help"]:
             temp = "模型列表: "
@@ -304,251 +326,183 @@ class Handle_group_message:
             else:
                 return ["模型不存在"]
 
-async def group_message_handler(messages, group_id, username, sender_id):
+async def group_message_handler(messages: list[dict], group_id: int, username: str, sender_id: int):
     if group_id not in groups:
         groups[group_id] = Handle_group_message(group_id)
     await groups[group_id].process(messages, username, sender_id)
 
+async def private_message_handler(messages: list[dict], user_id: int):
+    if user_id not in users:
+        users[user_id] = Handle_private_message(user_id)
+    await users[user_id].process(messages)
 
-# async def handle_private_message(messages, user_id):
-#     global first_time
-#     message_send = []
-#     text = process_first_message_text(messages)
-#     # bot内容
-#     if text[:1] == ".":
-#         match text[:5]:
-#             case ".stop":
-#                 await send_group_message(user_id, "已停止，待手动检查")
-#                 time.sleep(1)
-#                 breakpoint()
-#             case ".help":
-#                 message_send.append(f"https://www.{BASE_URL}/?p=77")
-#                 message_send.append("请复制到浏览器打开，时间可能较长")
-#             case ".say ":
-#                 text = text.replace(".say ", "")
-#                 HZYS = huoZiYinShua("./settings.json")
-#                 HZYS.export(text, "./Output.wav", True)
-#                 message_send.append(rf"[CQ:record,file=file:///{WORKING_DIR}\output.wav]")
-#             case ".ask ":
-#                 user_ask = text.replace(".ask ", "")
-#                 message_send.append(ask_ai("简短回答", user_ask, model=private_model_cache[user_id]))
-#             case ".pmt ":
-#                 user_input = text.replace(".pmt ", "")
-#                 db("UPDATE prompts SET prompt = %s WHERE owner = %s", (user_input, f"p{user_id}"))
-#                 message_send.append("设置成功")
-#             case ".pmt":
-#                 db("UPDATE prompts SET prompt = %s WHERE owner = %s", (DEFAULT_PROMPT, f"p{user_id}"))
-#                 message_send.append("设置成功，默认提示为：" + DEFAULT_PROMPT)
-#             case ".bil ":
-#                 user_input = text.replace(".bil ", "")
-#                 data = get_bili(user_input)
-#                 status = data["status"]
-#                 if status == 1:
-#                     try:
-#                         text = f'''标题: {data["title"]}
-# 简介: {data["desc"]}
-# 标签: {data["tag"]}
-# 字幕: 
-# {data["text"]}'''
-#                         summary = ask_ai(VIDEO_SUMMARY_PROMPT, text, model=private_model_cache[user_id])
-#                         message_send.append(f'''[CQ:image,file={data["pic_url"]}]标题: {data["title"]}\n简介: {data["desc"]}\n标签: {data["tag"]}\n总结: {summary}''')
-#                     except:
-#                         message_send.append(f'''[CQ:image,file={data["pic_url"]}]标题: {data["title"]}\n简介: {data["desc"]}\n标签: {data["tag"]}\n无法总结''')
-#                 elif status == 0:
-#                     message_send.append("Failed")
-#                 elif status == 2:
-#                     message_send.append(f'''[CQ:image,file={data["pic_url"]}]标题: {data["title"]}\n简介: {data["desc"]}\n标签: {data["tag"]}''')
-#             case ".mc":
-#                 host = f"srv.{BASE_URL}"
-#                 status, version, title, numplayers, maxplayers = search_minecraft_server(
-#                     host, 25565)
-#                 message_send.append(f'''服务器IP: {host}\n服务器状态: {status}\n游戏版本: {version}\n服务器标题: {title}\n当前玩家数: {numplayers}\n最大玩家数: {maxplayers}''')
-#             # case ".bph ":
-#             #     datas = []
-#             #     user_input = text.replace(".bph ", "")
-#             #     response = get_bil_pics(user_input)
-#             #     if response["status"]:
-#             #         pics = response["pics"]
-#             #         id = response["id"]
-#             #         if len(pics) > 3:
-#             #             for pic in pics:
-#             #                 results = get_saucenao_html(pic)
-#             #                 datas.append(results)
-#             #                 await asyncio.sleep(10)
-#             #         else:
-#             #             for pic in pics:
-#             #                 results = get_saucenao_html(pic)
-#             #                 if results:
-#             #                     datas.append(results)
-#             #         temp = f'''BILIBILI ID: {id}\n'''
-#             #         i = 1
-#             #         for results in datas:
-#             #             temp += f'''\n第{i}张图片: '''
-#             #             i += 1
-#             #             length_results = len(results)
-#             #             if length_results == 0:
-#             #                 temp += '''   无高相似结果'''
-#             #             else:
-#             #                 a = 1
-#             #                 for result in results:
-#             #                     temp += f'''\n    第{a}个结果: \n'''
-#             #                     a += 1
-#             #                     temp += f'''        创作者: {result["creator"]}\n        相似度: {result["similarity"]}\n        来源: {result["id"]}\n        链接: {result["url"]}'''
-#             #         message_send.append(temp)
-#             #     else:
-#             #         message_send.append("Failed")
-#             # case ".bpa ":
-#             #     datas = []
-#             #     user_input = text.replace(".bpa ", "")
-#             #     response = get_bil_pics(user_input)
-#             #     if response["status"]:
-#             #         pics = response["pics"]
-#             #         id = response["id"]
-#             #         if len(pics) > 3:
-#             #             for pic in pics:
-#             #                 results = get_saucenao_api(pic)
-#             #                 datas.append(results)
-#             #                 await asyncio.sleep(7.8)
-#             #         else:
-#             #             for pic in pics:
-#             #                 results = get_saucenao_api(pic)
-#             #                 if results:
-#             #                     datas.append(results)
-#             #         temp = f'''BILIBILI ID: {id}\n'''
-#             #         i = 1
-#             #         for results in datas:
-#             #             temp += f'''\n第{i}张图片: '''
-#             #             i += 1
-#             #             length_results = len(results)
-#             #             if length_results == 0:
-#             #                 temp += '''    无高相似结果'''
-#             #             else:
-#             #                 a = 1
-#             #                 for result in results:
-#             #                     temp += f'''\n    第{a}个结果: \n'''
-#             #                     a += 1
-#             #                     id_text = ''
-#             #                     for b in result["id"]:
-#             #                         id_text += f'''{b} '''
-#             #                     temp += f'''        相似度: {result["similarity"]}\n        来源: {result["db"]}\n        链接: {result["url"]}\n        {id_text}\n        作者: {result["creator"]}'''
-#             #         message_send.append(temp)
-#             #     else:
-#             #         message_send.append("Failed")
-#             case ".p":
-#                 time.sleep(10)
-#             case ".rdm":
-#                 result = fetch_db("SELECT range1, range2 FROM rsettings WHERE owner = %s", (f"p{user_id}",))
-#                 if result:
-#                     range1 = result[0][0]
-#                     range2 = result[0][1]
-#                 else:
-#                     range1 = 0
-#                     range2 = 1
-#                     db("INSERT INTO rsettings (owner, range1, range2) VALUES (%s, %s, %s)", (f"p{user_id}", 0, 1))
-#                 message_send.append(random.randint(range1, range2))
-#             case ".rdm ":
-#                 text_split = text.split()
-#                 if len(text_split) == 3:
-#                     db("UPDATE rsettings SET range1 = %s, range2 = %s WHERE owner = %s", (text_split[1], text_split[2], f"p{user_id}"))
-#                     message_send.append("设置成功")
-#                 else:
-#                     message_send.append("设置失败")
-#             case ".mdl ":
-#                 user_input = text.replace(".mdl ", "")
-#                 if user_input in ["ls", "list", "help"]:
-#                     result = fetch_db("SELECT * FROM mdesc")
-#                     temp = "模型列表: "
-#                     for i in result:
-#                         temp += f'''\n    {i[0]}: {i[1]}'''
-#                     message_send.append(temp)
-#                 else:
-#                     result = fetch_db("SELECT * FROM mdesc WHERE name = %s", (user_input,))
-#                     if result:
-#                         db("UPDATE bsettings SET model = %s WHERE owner = %s", (user_input, f"p{user_id}"))
-#                         private_model_cache[user_id] = user_input
-#                         message_send.append("设置成功，你选择的模型为" + user_input)
-#                     else:
-#                         message_send.append("模型不存在")
-#             case ".ping":
-#                 message_send.append("Pong!")
-#             case ".code":
-#                 if user_id in in_code_users:
-#                     message_send.append("代码模式已关闭")
-#                     in_code_users.remove(user_id)
-#                 else:
-#                     result = fetch_db("SELECT prompt FROM prompts WHERE owner = %s", (f"p{user_id}",))
-#                     first_time = True
-#                     if result:
-#                         chat_prompt = result[0][0]
-#                     else:
-#                         chat_prompt = DEFAULT_PROMPT
-#                         db("INSERT INTO prompts (owner, prompt) VALUES (%s, %s)", (f"p{user_id}", DEFAULT_PROMPT))
-#                     message_send.append("代码模式已开启")
-#                     in_code_users.append(user_id)
-#                     if chat_prompt == "None":
-#                         private_code_inited[user_id] = CodeExecutor(model=private_model_cache[user_id], messages=[])
-#                     else:
-#                         private_code_inited[user_id] = CodeExecutor(model=private_model_cache[user_id], messages=[{"role": "system", "content": chat_prompt}])
+class Handle_private_message:
+    """私聊消息处理类"""
+    def __init__(self, user_id):
+        self.user_id = user_id
+        self.model = fetch_db("SELECT model FROM bsettings WHERE owner = %s", (f"p{user_id}",))
+        if self.model:
+            self.model = self.model[0][0]
+            self.prompt = fetch_db("SELECT prompt FROM prompts WHERE owner = %s", (f"p{user_id}",))[0][0]
+        self.chatting = False
+        # a: text
+        self.mappings = {
+            ".stop": lambda a: self.stop(),
+            ".pmt ": lambda a: self.pmt_set(a),
+            ".pmt": lambda a: self.pmt_reset(),
+            ".bil ": lambda a: self.bil(a),
+            ".rdm": lambda a: self.rdm_use(),
+            ".rdm ": lambda a: self.rdm_set(a),
+            ".mdl ": lambda a: self.mdl(a),
+            ".ping": lambda a: self.ping(),
+            ".chat": lambda a: self.toggle_chat(),}
+    
+    async def process(self, messages: list[dict]):
+        """
+        处理私聊消息
+        
+        Args:
+            messages: 消息列表
+        """
+        text = process_first_message_text(messages)
+        command_handled = False
+        if text[:1] == '.':
+            if text[:5] in self.mappings:
+                result = self.mappings[text[:5]](text)
+                for i in result:
+                    await send_private_message(self.user_id, i)
+                    await asyncio.sleep(0.1)
+                command_handled = True
+                
+        # 处理聊天模式
+        if self.chatting and not command_handled:
+            await self.chat(messages)
+    
+    def stop(self) -> list[str]:
+        breakpoint()
+        return ["已停止，待手动检查"]
+    
+    def pmt_reset(self) -> list[str]:
+        db("UPDATE prompts SET prompt = %s WHERE owner = %s", (DEFAULT_PROMPT, f"p{self.user_id}"))
+        self.prompt = DEFAULT_PROMPT
+        return ["设置成功，默认提示为：" + DEFAULT_PROMPT]
+    
+    def pmt_set(self, plain_text) -> list[str]:
+        user_input = plain_text.replace(".pmt ", "")
+        self.prompt = user_input
+        db("UPDATE prompts SET prompt = %s WHERE owner = %s", (user_input, f"p{self.user_id}"))
+        return ["设置成功"]
+    
+    def bil(self, plain_text: str) -> list[str]:
+        return [formated_bili_summary(plain_text.replace(".bil ", ""))]
+    
+    def rdm_use(self) -> list[str]:
+        result = fetch_db("SELECT range1, range2 FROM rsettings WHERE owner = %s", (f"p{self.user_id}",))
+        if result:
+            range1 = result[0][0]
+            range2 = result[0][1]
+        else:
+            range1 = 0
+            range2 = 1
+            db("INSERT INTO rsettings (owner, range1, range2) VALUES (%s, %s, %s)", (f"p{self.user_id}", 0, 1))
+        return [f"{range1} - {range2}之间的随机数: {random.randint(range1, range2)}"]
+    
+    def rdm_set(self, plain_text: str) -> list[str]:
+        text_split = plain_text.split()
+        if len(text_split) == 3:
+            db("UPDATE rsettings SET range1 = %s, range2 = %s WHERE owner = %s", (text_split[1], text_split[2], f"p{self.user_id}"))
+            return ["设置成功"]
+        else:
+            return ["设置失败"]
+    
+    def mdl(self, plain_text: str) -> list[str]:
+        user_input = plain_text.replace(".mdl ", "")
+        if user_input in ["ls", "list", "help"]:
+            temp = "模型列表: "
+            for i in model_list_cache:
+                temp += f'''\n    {i}: {model_list_cache[i]["des"]}'''
+            return [temp]
+        else:
+            result = fetch_db("SELECT * FROM mdesc WHERE name = %s", (user_input,))
+            if result:
+                db("UPDATE bsettings SET model = %s WHERE owner = %s", (user_input, f"p{self.user_id}"))
+                self.model = user_input
+                return ["设置成功，你选择的模型为" + user_input]
+            else:
+                return ["模型不存在"]
+    
+    def ping(self) -> list[str]:
+        return ["Pong!"]
+    
+    def toggle_chat(self) -> list[str]:
+        if self.chatting:
+            self.chatting = False
+            del self.chat_instance
+            return ["代码模式已关闭"]
+        else:
+            result = fetch_db("SELECT prompt FROM prompts WHERE owner = %s", (f"p{self.user_id}",))
+            if result:
+                chat_prompt = result[0][0]
+            else:
+                chat_prompt = DEFAULT_PROMPT
+                db("INSERT INTO prompts (owner, prompt) VALUES (%s, %s)", (f"p{self.user_id}", DEFAULT_PROMPT))
+            self.chatting = True
+            self.chat_instance = CodeExecutor(model=self.model, messages=[{"role": "system", "content": chat_prompt}])
+            return ["代码模式已开启"]
+    
+    async def chat(self, messages: list[dict]):
+        self.chat_instance.append_message({"role": "user", "content": []})
+        contains_text = False
+        for message in messages:
+            match message["type"]:
+                case "text":
+                    contains_text = True
+                    self.chat_instance.append_message({"type": "text", "text": message["data"]["text"]}, to_last=True)
+                case "image":
+                    if model_list_cache[self.model]["vision"] == 1:
+                        self.chat_instance.append_message({"type": "image_url","image_url": {"url": message["data"]["url"].replace("https", "http")}}, to_last=True)
+                    else:
+                        image_text = ocr(message["data"]["url"].replace("https", "http"))
+                        self.chat_instance.append_message({"type": "text", "text": f"<图片文字: {image_text}>"}, to_last=True)
+                case "json":
+                    text = json.loads(message["data"]["data"])
+                    self.chat_instance.append_message({"type": "text", "text": f"<卡片: {text['prompt']}>"}, to_last=True)
+                case "file":
+                    response = requests.post("http://127.0.0.1:3001/get_file", json={"file_id": message["data"]["file_id"]}).json()
+                    shutil.copy(response["data"]["file"], rf".\temp\{response['data']['file_name']}")
+                    self.chat_instance.append_message({"type": "text", "text": f"<文件: .\{response['data']['file_name']}>"}, to_last=True)
+                case "video":
+                    self.chat_instance.append_message({"type": "text", "text": "<视频>"}, to_last=True)
+                case "record":
+                    asyncio.sleep(0.5)
+                    pos = message["data"]["path"]
+                    silk_to_wav(pos, r".\files\file.wav")
+                    requests.get("https://localhost:4856/sec_check?arg=file.wav", verify=False)
+                    text = stt(f"https://srv.{BASE_URL}:4856/download_fucking_file?filename=file.wav")
+                    self.chat_instance.append_message({"type": "text", "text": text}, to_last=True)
+                case "reply":
+                    reply_data = get_message(message["data"]["id"])
+                    text = messages_to_text(reply_data)[0]
+                    self.chat_instance.append_message({"type": "text", "text": f"<回复: {text}>"}, to_last=True)
+                case "face":
+                    self.chat_instance.append_message({"type": "text", "text": "<表情>"}, to_last=True)
+                case _:
+                    self.chat_instance.append_message({"type": "text", "text": "<未知>"}, to_last=True)
+        if contains_text:
+            result = self.chat_instance.process()
+            for i in result["return"]:
+                await send_private_message(self.user_id, i)
+                await asyncio.sleep(0.1)
+            while True:
+                if result["status"] in [2, 3]:
+                    result = self.chat_instance.process()
+                    for i in result["return"]:
+                        await send_private_message(self.user_id, i)
+                        await asyncio.sleep(0.1)
+                elif result["status"] in [0, 1]:
+                    break
 
-#     if user_id in in_code_users:
-#         if first_time:
-#             first_time = False
-#         else:
-#             private_code_inited[user_id].append_message({"role": "user", "content": []})
-#             contains_text = False
-#             for message in messages:
-#                 match message["type"]:
-#                     case "text":
-#                         contains_text = True
-#                         private_code_inited[user_id].append_message({"type": "text", "text": message["data"]["text"]}, to_last=True)
-#                     case "image":
-#                         if model_list_cache[private_model_cache[user_id]]["vision"] == 1:
-#                             private_code_inited[user_id].append_message({"type": "image_url","image_url": {"url": message["data"]["url"].replace("https", "http")}}, to_last=True)
-#                         else:
-#                             image_text = ocr(message["data"]["url"].replace("https", "http"))
-#                             private_code_inited[user_id].append_message({"type": "text", "text": f"<USER SENT PIC: {image_text}>"}, to_last=True)
-#                     case "json":
-#                         text = json.loads(message["data"]["data"])
-#                         private_code_inited[user_id].append_message({"type": "text", "text": f"<USER SENT CARD: {text['prompt']}>"}, to_last=True)
-#                     case "file":
-#                         response = requests.post("http://127.0.0.1:3001/get_file", json={"file_id": message["data"]["file_id"]}).json()
-#                         shutil.copy(response["data"]["file"], rf".\temp\{response['data']['file_name']}")
-#                         private_code_inited[user_id].append_message({"type": "text", "text": f"<USER SENT FILE: .\{response['data']['file_name']}>"}, to_last=True)
-#                     case "video":
-#                         private_code_inited[user_id].append_message({"type": "text", "text": "<USER SENT VIDEO>"}, to_last=True)
-#                     case "record":
-#                         await asyncio.sleep(0.5)
-#                         pos = message["data"]["path"]
-#                         silk_to_wav(pos, r".\files\file.wav")
-#                         requests.get("https://localhost:4856/sec_check?arg=file.wav", verify=False)
-#                         text = stt(f"https://srv.{BASE_URL}:4856/download_fucking_file?filename=file.wav")
-#                         private_code_inited[user_id].append_message({"type": "text", "text": text}, to_last=True)
-#                     case "at":
-#                         private_code_inited[user_id].append_message({"type": "text", "text": "<USER SENT AT>"}, to_last=True)
-#                     case "reply":
-#                         private_code_inited[user_id].append_message({"type": "text", "text": "<USER SENT REPLY>"}, to_last=True)
-#                     case "face":
-#                         private_code_inited[user_id].append_message({"type": "text", "text": "<USER SENT EMOJI>"}, to_last=True)
-#                     case _:
-#                         private_code_inited[user_id].append_message({"type": "text", "text": "<USER SENT UNSUPPORTED>"}, to_last=True)
-#             if contains_text:
-#                 result = private_code_inited[user_id].process()
-#                 for i in result["return"]:
-#                     await send_private_message(user_id, i)
-#                     await asyncio.sleep(0.1)
-#                 while True:
-#                     if result["status"] in [2, 3]:
-#                         result = private_code_inited[user_id].process()
-#                         for i in result["return"]:
-#                             await send_private_message(user_id, i)
-#                             await asyncio.sleep(0.1)
-#                     elif result["status"] in [0, 1]:
-#                         break
-#     for i in message_send:
-#         await send_private_message(user_id, i)
-#         await asyncio.sleep(0.1)
-
-async def send_private_message(user_id, message):
+async def send_private_message(user_id: int, message: str):
     # 别删!!!
     if f"{message}" == "":
         pass
@@ -562,16 +516,17 @@ async def send_private_message(user_id, message):
         })
         await global_websocket.send(response_json)
 
-def get_weather(adcode="310110"):
+def get_weather(adcode: str = "310110") -> dict:
     result = requests.get(f"https://restapi.amap.com/v3/weather/weatherInfo?key={AMAP_KEY}&city={adcode}&extensions=base").json()
     return {"time": time.time(), "weather": result["lives"][0]["weather"], "temperature": result["lives"][0]["temperature"], "humidity": result["lives"][0]["humidity"], "windpower": result["lives"][0]["windpower"]}
 
-def get_poem_and_tip():
+def get_poem_and_tip() -> tuple[str, str]:
     result1 = requests.get("https://v1.jinrishici.com/all.json").json()
     result2 = requests.get("https://v1.hitokoto.cn").json()
     return f"{result1['content']} - {result1['origin']}", result2["hitokoto"]
 
-def get_emo_result_loop(task_id):
+def get_emo_result_loop(task_id) -> dict:
+    '''emo模型结果获取'''
     while True:
         url = f"https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}"
         headers = {"Authorization": ALIYUN_KEY}
@@ -585,7 +540,7 @@ def get_emo_result_loop(task_id):
         else:
             return {"status": 0, "result": result["output"]["message"]}
 
-def get_username(id, times = 0):
+def get_username(id: int, times: int = 0) -> str:
     try:
         result = requests.post("http://127.0.0.1:3001/get_stranger_info", json={"user_id": id}).json()
         data = result["data"]["nick"]
@@ -601,7 +556,7 @@ def get_username(id, times = 0):
             print("---")
             return None
 
-def draw_tarot_cards(spread_type='three_card', custom_draw=None):
+def draw_tarot_cards(spread_type: str = 'three_card', custom_draw = None) -> list[dict]:
     # 塔罗牌生成器
     def create_deck():
         major_arcana = [
@@ -657,7 +612,7 @@ def draw_tarot_cards(spread_type='three_card', custom_draw=None):
     
     return drawn[:draw_num]  # 确保精确返回请求数量
 
-def parse_to_narrative(card_list):
+def parse_to_narrative(card_list) -> str:
     parts = []
     for i, card in enumerate(card_list, 1):
         desc = f"第{i}张牌是[{card['name']}]"
@@ -668,12 +623,12 @@ def parse_to_narrative(card_list):
         parts.append(desc)
     return " ".join(parts)[:-1]
 
-def get_message(id):
+def get_message(id: int) -> dict:
     result = requests.post("http://127.0.0.1:3001/get_msg", json={"message_id": id}).json()
     data = result["data"]["message"]
     return data
 
-def get_group_members(group_id):
+def get_group_members(group_id: int) -> list[int]:
     result = requests.post("http://127.0.0.1:3001/get_group_member_list", json={"group_id": group_id,"no_cache": False}).json()
     members = []
     for i in result["data"]:
@@ -684,31 +639,48 @@ def get_group_members(group_id):
     members.remove(SELF_ID_INT)
     return members
 
+def formated_bili_summary(data: str, model: str=DEFAULT_MODEL) -> str:
+    user_input = text.replace(".bil ", "")
+    data = get_bili_text(user_input)
+    status = data["status"]
+    if status == 1:
+        try:
+            text = f'''标题: {data["title"]}
+简介: {data["desc"]}
+标签: {data["tag"]}
+字幕: 
+{data["text"]}'''
+            summary = ask_ai(VIDEO_SUMMARY_PROMPT, text, model=model)
+            return f'''[CQ:image,file={data["pic_url"]}]标题: {data["title"]}\n简介: {data["desc"]}\n标签: {data["tag"]}\n总结: {summary}'''
+        except:
+            return f'''[CQ:image,file={data["pic_url"]}]标题: {data["title"]}\n简介: {data["desc"]}\n标签: {data["tag"]}\n无法总结'''
+    elif status == 0:
+        return "Failed"
+    elif status == 2:
+        return f'''[CQ:image,file={data["pic_url"]}]标题: {data["title"]}\n简介: {data["desc"]}\n标签: {data["tag"]}'''
 
-
-def get_foward_messages(id):
+def get_foward_messages(id: int) -> list[dict]:
     '''返回messages'''
     result = requests.post("http://127.0.0.1:3001/get_forward_msg", json={"message_id": id}).json()
     data = result["data"]["messages"]
     return data
 
 
-async def send_group_message(group_id, message):
-    # 别删!!!
-    if f"{message}" == "":
-        pass
-    else:
+async def send_group_message(group_id: int, message: str):
+    """发送群消息"""
+    if message:
         data = json.dumps({
             "action": "send_group_msg",
             "params": {
                 "group_id": group_id,
-                "message": f"{message}"
+                "message": message
             },
         })
         await global_websocket.send(data)
 
 
 async def handler(websocket):
+    """消息处理器"""
     global global_websocket
     global_websocket = websocket
     async for message in websocket:
@@ -716,18 +688,14 @@ async def handler(websocket):
         if "message_type" in data:
             if data["message_type"] == "group":
                 await group_message_handler(data["message"], data["group_id"], data["sender"]["nickname"], data["sender"]["user_id"])
-            # elif data["message_type"] == "private":
-            #     await handle_private_message(data["message"], data["user_id"])
+            elif data["message_type"] == "private":
+                await private_message_handler(data["message"], data["user_id"])
 
 
 def start_server():
     global event_loop
-    # subprocess.Popen(['python', 'host_file.py'])
-    # subprocess.Popen(['python', 'host_file.py'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-    print("Host file started")
     event_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(event_loop)
-    print("QQ bot started")
     start_wss_server_task = websockets.serve(handler, "0.0.0.0", 8080)
     event_loop.run_until_complete(start_wss_server_task)
     event_loop.run_forever()

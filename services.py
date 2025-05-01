@@ -10,7 +10,7 @@ from urllib3.exceptions import InsecureRequestWarning
 from settings import *
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-def get_bili(user_input):
+def get_bili_text(user_input):
     try:
         if user_input.startswith("BV") or user_input.startswith("av") or user_input.startswith("bv"):
             url = f"https://www.bilibili.com/video/{user_input}/"
@@ -50,7 +50,6 @@ def get_bili(user_input):
         return {"status": 1, 'title': title, 'pic_url': pic_url, 'desc': desc, 'text': text, 'tag': tag}
     except:
         return {"status": 0}
-
 
 def search_minecraft_server(host, port):
     try:
@@ -213,7 +212,7 @@ def get_saucenao_api(url):
 
 def fetch_db(prompt, data=None):
     conn = mysql.connector.connect(
-        host='192.168.0.76',
+        host='127.0.0.1',
         user='user',
         passwd='abc12345',
         database='main',
@@ -233,7 +232,7 @@ def fetch_db(prompt, data=None):
 
 def db(prompt, data=None):
     conn = mysql.connector.connect(
-        host='192.168.0.76',
+        host='127.0.0.1',
         user='user',
         passwd='abc12345',
         database='main',

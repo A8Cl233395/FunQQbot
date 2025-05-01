@@ -13,10 +13,10 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 from settings import *
 dashscope.api_key = ALIYUN_KEY
 
-def ask_ai(prompt, content, model="qwen-turbo"):
-    BASE_URL = PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"]
+def ask_ai(prompt, content, model=DEFAULT_MODEL):
+    url = PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"]
     api_key = PREFIX_TO_ENDPOINT[model.split("-")[0]]["key"]
-    oclient = OpenAI(api_key=api_key, BASE_URL=BASE_URL)
+    oclient = OpenAI(api_key=api_key, base_url=url)
     if prompt == "":
         messages = [{"role": "user", "content": content}]
     else:
@@ -29,10 +29,10 @@ def ask_ai(prompt, content, model="qwen-turbo"):
     return response.choices[0].message.content
 
 
-def ai(messages,model="qwen-turbo"):
-    BASE_URL = PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"]
+def ai(messages,model=DEFAULT_MODEL):
+    url = PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"]
     api_key = PREFIX_TO_ENDPOINT[model.split("-")[0]]["key"]
-    oclient = OpenAI(api_key=api_key, BASE_URL=BASE_URL)
+    oclient = OpenAI(api_key=api_key, base_url=url)
     response = oclient.chat.completions.create(
         model=model,
         messages=messages,
@@ -41,19 +41,18 @@ def ai(messages,model="qwen-turbo"):
     return response.choices[0].message.content
 
 class CodeExecutor:
-
-    def __init__(self, model="qwen-turbo", messages=[{"role": "system", "content": "你被赋予使用函数，程序可以连接网络"}]):
+    def __init__(self, model=DEFAULT_MODEL, messages=[{"role": "system", "content": "你被赋予使用函数，程序可以连接网络"}]):
         self.tools = [
             {
                 "type": "function",
                 "function": {
-                    "name": "run_py",
-                    "description": "执行python代码，捕捉控制台输出，20秒超时，环境可联网，于未保护的实体机上运行",
+                    "name": "run_python",
+                    "description": "执行纯 Python 代码（非 Jupyter Notebook 格式），返回标准输出和错误。代码必须是完整的脚本，不支持 IPython 魔术命令或 Shell 指令。环境可联网，运行在未受保护的实体机上，超时 20 秒。",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "code": {
-                                "description": "python代码",
+                                "description": "纯 Python 代码（非 .ipynb 格式），需包含显式的打印语句才能捕获输出。",
                                 "type": "string",
                             },
                         },
@@ -120,9 +119,9 @@ class CodeExecutor:
         self.spider = None
 
     def ai(self):
-        BASE_URL = PREFIX_TO_ENDPOINT[self.model.split("-")[0]]["url"]
+        url = PREFIX_TO_ENDPOINT[self.model.split("-")[0]]["url"]
         api_key = PREFIX_TO_ENDPOINT[self.model.split("-")[0]]["key"]
-        oclient = OpenAI(api_key=api_key, BASE_URL=BASE_URL)
+        oclient = OpenAI(api_key=api_key, base_url=url)
         response = oclient.chat.completions.create(
             model=self.model,
             messages=self.messages,
@@ -145,7 +144,7 @@ class CodeExecutor:
             requests.get(f"https://localhost:4856/sec_check?arg={filename}", verify=False)
             return f"https://srv.{BASE_URL}:4856/wf_file?filename={filename}"
         else:
-            return "File not found."
+            return "找不到文件"
 
     def append_message(self, content, to_last = False):
         if to_last:
@@ -181,11 +180,11 @@ class CodeExecutor:
             returns = [result[0]]
 
         elif user_input in ["N", "n", "no", "No", "NO", "否"]:
-            content = "Denied by user."
+            content = "被用户拒绝"
             returns = ["--------\n被拒绝\n--------"]
 
         else:
-            content = f"Denied by user: {user_input}"
+            content = f"被用户拒绝: {user_input}"
             returns = ["--------" + "\n" + "被拒绝:" + user_input + "\n" + "--------"]
 
         self.messages.append({
@@ -211,7 +210,7 @@ class CodeExecutor:
                 f.write(function.arguments)
             arguments = json.loads(function.arguments)
 
-            if name == "run_py":
+            if name == "run_python":
                 self.status = 1
                 arg = arguments["code"]
             elif name == "send_file":
@@ -227,7 +226,7 @@ class CodeExecutor:
             returns.append("--------" + "\n" + f"函数: {name}\n参数: {arg}\n--------")
 
             if self.status == 1:
-                returns[-1] += "\n是否确认执行? (y/n/(拒绝理由))"
+                returns[-1] += "\n是否确认执行? (y/N/(拒绝理由))"
 
         else:
             self.status = 0
@@ -240,7 +239,7 @@ class CodeExecutor:
         name = function.name
         arguments = json.loads(function.arguments)
 
-        if name == "run_py":
+        if name == "run_python":
             response_content = self.run_code(arguments["code"])
             return_text = response_content
         elif name == "send_file":

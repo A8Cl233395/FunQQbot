@@ -1,10 +1,8 @@
 from flask import Flask, send_from_directory, abort, request
 import ssl
-
+from settings import WORKING_DIR
 app = Flask(__name__)
 allowed = []
-
-DOWNLOAD_FOLDER = r'C:\Users\Admin\Desktop\qqbot\2\files'
 
 @app.route('/download_fucking_file')
 def download_file():
@@ -12,7 +10,7 @@ def download_file():
     if filename in allowed:
         allowed.remove(filename)
         try:
-            return send_from_directory(directory=DOWNLOAD_FOLDER, path=filename, as_attachment=True)
+            return send_from_directory(directory=f"{WORKING_DIR}/files", path=filename, as_attachment=True)
         except FileNotFoundError:
             abort(404)
     else:
@@ -21,7 +19,7 @@ def download_file():
 @app.route('/favicon.ico')
 def favicon():
     try:
-        return send_from_directory(directory=DOWNLOAD_FOLDER, path="web2.ico")
+        return send_from_directory(directory=f"{WORKING_DIR}/files", path="web2.ico")
     except FileNotFoundError:
         abort(404)
 
@@ -41,11 +39,22 @@ def wf_file():
     if filename in allowed:
         allowed.remove(filename)
         try:
-            return send_from_directory(directory=r'C:\Users\Admin\Desktop\qqbot\2\temp', path=filename, as_attachment=True)
+            return send_from_directory(directory=rf'{WORKING_DIR}/temp', path=filename, as_attachment=True)
         except FileNotFoundError:
             abort(404)
     else:
         abort(404)
+
+@app.route('/upload_file', methods=['POST'])
+def upload_file():
+    if request.method == 'POST':
+        file = request.files.get('file')
+        if file:
+            fileformat = file.filename.split('.')[-1]
+            file.save(f'C:/Users/Admin/Desktop/qqbot/2/files/tempfile.{fileformat}')
+            allowed.append(f'tempfile.{fileformat}')
+            return "ok"
+    return "error"
 
 @app.route('/ping')
 def ping():

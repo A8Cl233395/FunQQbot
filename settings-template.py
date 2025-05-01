@@ -57,14 +57,14 @@ LUCK_SYSTEM_PROMPT = r'''# 系统提示词
 
 # API 端点和密钥配置
 PREFIX_TO_ENDPOINT:dict = {
-    "qwen": {"url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "key": ""},
-    "deepseek": {"url": "https://api.deepseek.com", "key": ""},
-    "gemini": {"url": "", "key": ""},
-    "glm": {"url": "https://open.bigmodel.cn/api/paas/v4/", "key": ""}
+    "qwen": {"url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "key": },
+    "deepseek": {"url": "https://api.deepseek.com", "key": },
+    "gemini": {"url": "", "key": },
+    "glm": {"url": "https://open.bigmodel.cn/api/paas/v4/", "key": }
 }
 
-ALIYUN_KEY: str = 
-AMAP_KEY:str = 
+ALIYUN_KEY: str =  # 阿里云API密钥，用于语音识别
+AMAP_KEY:str =  # 高德API密钥，用于获取天气信息
 
 # 视频总结提示词配置
 VIDEO_SUMMARY_PROMPT: str = r'''准确、详细、无误、条理清晰的总结输入的视频信息。
@@ -78,7 +78,6 @@ VIDEO_SUMMARY_PROMPT: str = r'''准确、详细、无误、条理清晰的总结
 - 如果包含广告，你应该去除'''
 
 # 用户和机器人ID配置
-ADMIN_ID: int = 
 SELF_ID: str = 
 SELF_ID_INT: int = 
 SELF_NAME: str = 
@@ -98,3 +97,4 @@ BASE_URL: str =
 FFMPEG_PATH: str = "ffmpeg" # ffmpeg路径，如果ffmpeg在系统环境变量中可以设置为"ffmpeg"，否则需要设置为ffmpeg的绝对路径
 WORKING_DIR = os.getcwd() # 工作目录
 FILE_DIR = os.path.dirname(os.path.abspath(__file__)) # 文件目录
+DEFAULT_MODEL: str = 
