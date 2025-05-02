@@ -53,7 +53,7 @@ def messages_to_text(messages: list[dict], username: str="") -> tuple[str, bool,
                 case "video":
                     output_text += " <视频>"
                 case "record":
-                    time.sleep(0.5)
+                    time.sleep(1)
                     pos = message["data"]["path"]
                     silk_to_wav(pos, rf".\file.wav")
                     requests.get("https://localhost:4856/sec_check?arg=file.wav", verify=False)
@@ -474,7 +474,7 @@ class Handle_private_message:
                 case "video":
                     self.chat_instance.append_message({"type": "text", "text": "<视频>"}, to_last=True)
                 case "record":
-                    asyncio.sleep(0.5)
+                    asyncio.sleep(1)
                     pos = message["data"]["path"]
                     silk_to_wav(pos, r".\files\file.wav")
                     requests.get("https://localhost:4856/sec_check?arg=file.wav", verify=False)
@@ -639,7 +639,7 @@ def get_group_members(group_id: int) -> list[int]:
     members.remove(SELF_ID_INT)
     return members
 
-def formated_bili_summary(data: str, model: str=DEFAULT_MODEL) -> str:
+def formated_bili_summary(text: str, model: str=DEFAULT_MODEL) -> str:
     user_input = text.replace(".bil ", "")
     data = get_bili_text(user_input)
     status = data["status"]
