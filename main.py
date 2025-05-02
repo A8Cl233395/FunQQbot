@@ -78,7 +78,7 @@ def messages_to_text(messages: list[dict], username: str="") -> tuple[str, bool,
                     data = get_foward_messages(message["data"]["id"])
                     text = " "
                     for i in data:
-                        text += messages_to_text(i["message"], i["sender"]["nickname"]) + "\n"
+                        text += messages_to_text(i["message"], i["sender"]["nickname"])[0] + "\n"
                     output_text += f" <合并转发开始>\n{text}\n<合并转发结束>"
                 case "markdown":
                     output_text += f" <markdown: {message['data']['content']}>"
