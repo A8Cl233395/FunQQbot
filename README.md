@@ -26,6 +26,15 @@
   pip install -r requirements.txt
   ```
 
+### OCR 配置
+项目使用 Umi-OCR 进行图片文字识别，配置方法如下：
+
+1. 下载并运行 [Umi-OCR](https://github.com/hiroi-sora/Umi-OCR)
+2. 在设置中开启HTTP服务，端口设置为1224
+3. 确保服务可被本地访问
+
+如需使用自定义OCR方案，请修改 `bigmodel.py` 中的 `ocr()` 函数实现
+
 ### 数据库配置
 项目使用 MySQL 数据库，默认配置如下：
 
@@ -147,10 +156,13 @@ python main.py
 
 ## 注意事项
 
-1. 部分功能依赖外部API，请确保网络连接正常
-2. 首次运行可能需要初始化数据库
-3. 私人消息处理功能已启用，`.chat` 命令用于切换私聊代码执行模式
-4. 确保配套服务（如localhost:4856和127.0.0.1:3001）正常运行
+1. 部分功能依赖外部API，请确保网络连接正常且余额充足
+2. 首次运行需要初始化数据库
+3. 确保配套服务正常运行，包括：
+   - Napcat 服务 (localhost:3001)
+   - Umi-OCR 服务 (localhost:1224)
+   - host_file.py 服务 (localhost:4856)
+   - SQL 服务 (localhost:3306)
 
 ## 开源协议
 

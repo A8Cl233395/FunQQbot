@@ -291,7 +291,7 @@ def stt(file_path):
     text = text_json["transcripts"][0]['text']
     return text
 
-def url_to_b64(url):
+def url_to_b64(url: str) -> str:
     response = requests.get(url)
     # 使用BytesIO读取图片内容
     image = Image.open(BytesIO(response.content))
@@ -308,7 +308,7 @@ def url_to_b64(url):
     img_base64 = base64.b64encode(img_byte_arr).decode('utf-8')
     return img_base64
 
-def ocr(url):
+def ocr(url: str) -> str:
     img_base64 = url_to_b64(url)
     json_data = json.dumps({
         "base64": img_base64,
