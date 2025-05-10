@@ -354,7 +354,6 @@ class Handle_private_message:
             ".ping": lambda a: self.ping(),
             ".chat": lambda a: self.toggle_chat(),
             ".drw ": lambda a: self.draw(a),
-            ".p": lambda a: self.pause(),
             }
     
     async def process(self, messages):
@@ -377,10 +376,6 @@ class Handle_private_message:
         # 处理聊天模式
         if self.chatting and not command_handled:
             await self.chat(messages)
-
-    def pause(self):
-        time.sleep(5)
-        return ["已暂停5s"]
     
     def stop(self):
         breakpoint()
@@ -638,13 +633,9 @@ def get_message(id):
     return data
 
 def get_group_members(group_id):
-    result = requests.post("http://127.0.0.1:3001/get_group_member_list", json={"group_id": group_id,"no_cache": False}).json()
+    result = requests.post("http://127.0.0.1:3001/get_group_member_list", json={"group_id": group_id}).json()
     members = []
-    for i in result["data"]:
-        if i["is_robot"]:
-            pass
-        else:
-            members.append(i["user_id"])
+    members = [i["user_id"] for i in result["data"] if not i["is_robot"]]
     members.remove(SELF_ID_INT)
     return members
 

@@ -163,6 +163,7 @@ python main.py
    - Umi-OCR 服务 (localhost:1224)
    - host_file.py 服务 (localhost:4856)
    - SQL 服务 (localhost:3306)
+4. 为了保证数据库干净，建议定期运行 `sweeper.py` 脚本以清理数据库中多余的记录。
 
 ## 开源协议
 

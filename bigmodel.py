@@ -339,7 +339,7 @@ def emo(img_url, audio_url, face_bbox, ext_bbox, style_level="active"):
 
 def draw(prompt, model="cogview-3-flash", size="1024x1024"):
     '''返回图像链接'''
-    client = OpenAI(api_key=PREFIX_TO_ENDPOINT["glm"]["key"], base_url=PREFIX_TO_ENDPOINT["glm"]["url"])
+    client = OpenAI(api_key=PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"], base_url=PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"])
     result = client.images.generate(
         model=model,
         prompt=prompt,
