@@ -69,7 +69,7 @@ class CodeExecutor:
                         "type": "object",
                         "properties": {
                             "filename": {
-                                "description": "文件名，仅工作目录根目录下",
+                                "description": "文件名，仅允许工作目录根目录下",
                                 "type": "string",
                             },
                         },
@@ -134,15 +134,15 @@ class CodeExecutor:
         try:
             result = subprocess.run(["python", "-c", code], timeout=20, check=True, text=True, capture_output=True, cwd=self.cwd)
             return result.stdout
-        except subprocess.TimeoutExpired:
-            return "Process timed out and was terminated."
+        except subprocess.TimeoutExpired as e:
+            return f"任务超时已被结束.\n已输出内容: {e.output.decode('utf-8') if e.output else ''}"
         except subprocess.CalledProcessError as e:
-            return f"Command failed with return code {e.returncode}\nError output:\n{e.stderr}"
+            return f"失败: {e.returncode}\n错误输出: \n{e.stderr}"
 
     def host_file(self, filename):
         if os.path.exists(rf"{self.cwd}\{filename}"):
             requests.get(f"https://localhost:4856/sec_check?arg={filename}", verify=False)
-            return f"https://srv.{BASE_URL}:4856/wf_file?filename={filename}"
+            return f"https://{BASE_URL}:4856/wf_file?filename={filename}"
         else:
             return "找不到文件"
 
@@ -206,8 +206,6 @@ class CodeExecutor:
         if response.tool_calls:
             function = response.tool_calls[0].function
             name = function.name
-            with open("test.json", "w", encoding="utf-8") as f:
-                f.write(function.arguments)
             arguments = json.loads(function.arguments)
 
             if name == "run_python":
@@ -338,3 +336,13 @@ def emo(img_url, audio_url, face_bbox, ext_bbox, style_level="active"):
     json_data = json.dumps(data)
     result = requests.post(url, headers=headers, data=json_data).json()
     return result["output"]["task_id"]
+
+def draw(prompt, model="cogview-3-flash", size="1024x1024"):
+    '''返回图像链接'''
+    client = OpenAI(api_key=PREFIX_TO_ENDPOINT["glm"]["key"], base_url=PREFIX_TO_ENDPOINT["glm"]["url"])
+    result = client.images.generate(
+        model=model,
+        prompt=prompt,
+        size=size,
+    )
+    return result.data[0].url

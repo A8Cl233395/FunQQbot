@@ -5,12 +5,13 @@ from services import *
 import shutil
 import random
 import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 from settings import *
-username_cache: dict[int, str] = {}
-groups: dict[int, any] = {}
-users: dict[int, any] = {}
+username_cache = {}
+groups = {}
+users = {}
 weather = {"time": 0}
 
 first_time = False
@@ -20,7 +21,7 @@ for i in result:
     model_list_cache[i[0]] = {"des": i[1], "vision": i[2]}
 print("启动中...")
 
-def messages_to_text(messages: list[dict], username: str="") -> tuple[str, bool, str]:
+def messages_to_text(messages, username=""):
     """
     将消息列表转换为文本
 
@@ -98,7 +99,7 @@ def messages_to_text(messages: list[dict], username: str="") -> tuple[str, bool,
         print(e)
         print("---")
 
-def ai_reply(messages: list[str], model: str, prompt: str) -> list[str]:
+def ai_reply(messages, model, prompt):
     """
     调用AI模型生成回复
 
@@ -125,7 +126,7 @@ def ai_reply(messages: list[str], model: str, prompt: str) -> list[str]:
         splited[i] = splited[i].strip()
     return splited
 
-def process_first_message_text(messages: list[dict]) -> str:
+def process_first_message_text(messages):
     """处理消息列表中的第一个消息文本内容"""
     first_message = messages[0]
     if first_message.get("type") == "text":  # 检查第一个消息是否为文本内容
@@ -158,11 +159,12 @@ class Handle_group_message:
             ".rdm ": lambda a, b: self.rdm_set(a),
             ".mdl ": lambda a, b: self.mdl(a),
             ".ping": lambda a, b: self.ping(),
+            ".drw ": lambda a, b: self.draw(a),
         }
         self.last_time = 0
         self.delete = True # 阻止删除消息，使用大模型缓存
 
-    async def process(self, messages: list[dict], username: str, sender_id: int):
+    async def process(self, messages, username, sender_id):
         """
         处理群消息
         
@@ -204,20 +206,20 @@ class Handle_group_message:
             await send_group_message(self.group_id, i)
             await asyncio.sleep(0.1)
         
-    def ping(self) -> list[str]:
+    def ping(self):
         return ["Pong!"]
 
-    def stop(self) -> list[str]:
+    def stop(self):
         breakpoint()
         return ["已停止，待手动检查"]
     
-    def tar(self, plain_text: str) -> list[str]:
+    def tar(self, plain_text):
         cards = parse_to_narrative(draw_tarot_cards())
         user_input = plain_text[5:]
         result = ask_ai(f"你是塔罗牌占卜师，这是你抽出的塔罗牌: \n{cards}", user_input, model=self.model)
         return [cards + "\n---\n" + result]
 
-    def luck(self, sender_id: int) -> list[str]:
+    def luck(self, sender_id):
         global weather
         current_time_int = time.time()
         current_time_raw = time.localtime()
@@ -237,10 +239,10 @@ class Handle_group_message:
         result = f"[CQ:at,qq={sender_id}] 你的每日运势从炉管出来了💥\n" + result
         return [result]
 
-    def help(self) -> list[str]:
+    def help(self):
         return [f"https://www.{BASE_URL}/?p=77", "请复制到浏览器打开，时间可能较长"]
 
-    def rst(self) -> list[str]:
+    def rst(self):
         self.stored_messages = []
         return ["已清除聊天记录缓存"]
 
@@ -249,8 +251,13 @@ class Handle_group_message:
         db("INSERT INTO prompts (owner, prompt) VALUES (%s, %s)", (f"g{self.group_id}", DEFAULT_PROMPT))
         self.model = DEFAULT_MODEL
         self.prompt = DEFAULT_PROMPT
+
+    def draw(self, plain_text):
+        prompt = plain_text.replace(".drw ", "")
+        url = draw(prompt)
+        return [f"[CQ:image,file={url}]"]
     
-    def vid(self) -> list[str]:
+    def vid(self):
         if self.original_messages[-3]["type"] == "image": #检查图片
             if self.original_messages[-2]["type"] == "file": #检查文件
                 if self.original_messages[-2]["data"]["file"][-4:] in [".wav", ".mp3"]: #检查是否为音频文件
@@ -280,18 +287,18 @@ class Handle_group_message:
         else:
             return ["请发送图片和音频文件"]
 
-    def pmt_reset(self) -> list[str]:
+    def pmt_reset(self):
         db("UPDATE prompts SET prompt = %s WHERE owner = %s", (DEFAULT_PROMPT, f"g{self.group_id}"))
         self.prompt = DEFAULT_PROMPT
         return ["设置成功，默认提示为：" + DEFAULT_PROMPT]
 
-    def pmt_set(self, plain_text) -> list[str]:
+    def pmt_set(self, plain_text):
         user_input = plain_text.replace(".pmt ", "")
         self.prompt = user_input
         db("UPDATE prompts SET prompt = %s WHERE owner = %s", (user_input, f"g{self.group_id}"))
         return ["设置成功"]
 
-    def rdm_use(self) -> list[str]:
+    def rdm_use(self):
         result = fetch_db("SELECT range1, range2 FROM rsettings WHERE owner = %s", (f"g{self.group_id}",))
         if result:
             range1 = result[0][0]
@@ -302,7 +309,7 @@ class Handle_group_message:
             db("INSERT INTO rsettings (owner, range1, range2) VALUES (%s, %s, %s)", (f"g{self.group_id}", 0, 1))
         return [f"{range1} - {range2}之间的随机数: {random.randint(range1, range2)}"]
 
-    def rdm_set(self, plain_text) -> list[str]:
+    def rdm_set(self, plain_text):
         text_split = plain_text.split()
         if len(text_split) == 3:
             db("UPDATE rsettings SET range1 = %s, range2 = %s WHERE owner = %s", (text_split[1], text_split[2], f"g{self.group_id}"))
@@ -310,7 +317,7 @@ class Handle_group_message:
         else:
             return ["设置失败"]
     
-    def mdl(self, plain_text) -> list[str]:
+    def mdl(self, plain_text):
         user_input = plain_text.replace(".mdl ", "")
         if user_input in ["ls", "list", "help"]:
             temp = "模型列表: "
@@ -325,16 +332,6 @@ class Handle_group_message:
                 return ["设置成功，你选择的模型为" + user_input]
             else:
                 return ["模型不存在"]
-
-async def group_message_handler(messages: list[dict], group_id: int, username: str, sender_id: int):
-    if group_id not in groups:
-        groups[group_id] = Handle_group_message(group_id)
-    await groups[group_id].process(messages, username, sender_id)
-
-async def private_message_handler(messages: list[dict], user_id: int):
-    if user_id not in users:
-        users[user_id] = Handle_private_message(user_id)
-    await users[user_id].process(messages)
 
 class Handle_private_message:
     """私聊消息处理类"""
@@ -355,9 +352,12 @@ class Handle_private_message:
             ".rdm ": lambda a: self.rdm_set(a),
             ".mdl ": lambda a: self.mdl(a),
             ".ping": lambda a: self.ping(),
-            ".chat": lambda a: self.toggle_chat(),}
+            ".chat": lambda a: self.toggle_chat(),
+            ".drw ": lambda a: self.draw(a),
+            ".p": lambda a: self.pause(),
+            }
     
-    async def process(self, messages: list[dict]):
+    async def process(self, messages):
         """
         处理私聊消息
         
@@ -377,26 +377,30 @@ class Handle_private_message:
         # 处理聊天模式
         if self.chatting and not command_handled:
             await self.chat(messages)
+
+    def pause(self):
+        time.sleep(5)
+        return ["已暂停5s"]
     
-    def stop(self) -> list[str]:
+    def stop(self):
         breakpoint()
         return ["已停止，待手动检查"]
     
-    def pmt_reset(self) -> list[str]:
+    def pmt_reset(self):
         db("UPDATE prompts SET prompt = %s WHERE owner = %s", (DEFAULT_PROMPT, f"p{self.user_id}"))
         self.prompt = DEFAULT_PROMPT
         return ["设置成功，默认提示为：" + DEFAULT_PROMPT]
     
-    def pmt_set(self, plain_text) -> list[str]:
+    def pmt_set(self, plain_text):
         user_input = plain_text.replace(".pmt ", "")
         self.prompt = user_input
         db("UPDATE prompts SET prompt = %s WHERE owner = %s", (user_input, f"p{self.user_id}"))
         return ["设置成功"]
     
-    def bil(self, plain_text: str) -> list[str]:
+    def bil(self, plain_text):
         return [formated_bili_summary(plain_text.replace(".bil ", ""))]
     
-    def rdm_use(self) -> list[str]:
+    def rdm_use(self):
         result = fetch_db("SELECT range1, range2 FROM rsettings WHERE owner = %s", (f"p{self.user_id}",))
         if result:
             range1 = result[0][0]
@@ -407,7 +411,7 @@ class Handle_private_message:
             db("INSERT INTO rsettings (owner, range1, range2) VALUES (%s, %s, %s)", (f"p{self.user_id}", 0, 1))
         return [f"{range1} - {range2}之间的随机数: {random.randint(range1, range2)}"]
     
-    def rdm_set(self, plain_text: str) -> list[str]:
+    def rdm_set(self, plain_text):
         text_split = plain_text.split()
         if len(text_split) == 3:
             db("UPDATE rsettings SET range1 = %s, range2 = %s WHERE owner = %s", (text_split[1], text_split[2], f"p{self.user_id}"))
@@ -415,7 +419,7 @@ class Handle_private_message:
         else:
             return ["设置失败"]
     
-    def mdl(self, plain_text: str) -> list[str]:
+    def mdl(self, plain_text):
         user_input = plain_text.replace(".mdl ", "")
         if user_input in ["ls", "list", "help"]:
             temp = "模型列表: "
@@ -431,10 +435,10 @@ class Handle_private_message:
             else:
                 return ["模型不存在"]
     
-    def ping(self) -> list[str]:
+    def ping(self):
         return ["Pong!"]
     
-    def toggle_chat(self) -> list[str]:
+    def toggle_chat(self):
         if self.chatting:
             self.chatting = False
             del self.chat_instance
@@ -450,7 +454,12 @@ class Handle_private_message:
             self.chat_instance = CodeExecutor(model=self.model, messages=[{"role": "system", "content": chat_prompt}])
             return ["代码模式已开启"]
     
-    async def chat(self, messages: list[dict]):
+    def draw(self, plain_text):
+        prompt = plain_text.replace(".drw ", "")
+        url = draw(prompt)
+        return [f"[CQ:image,file={url}]"]
+    
+    async def chat(self, messages):
         self.chat_instance.append_message({"role": "user", "content": []})
         contains_text = False
         for message in messages:
@@ -502,7 +511,7 @@ class Handle_private_message:
                 elif result["status"] in [0, 1]:
                     break
 
-async def send_private_message(user_id: int, message: str):
+async def send_private_message(user_id, message):
     # 别删!!!
     if f"{message}" == "":
         pass
@@ -516,16 +525,16 @@ async def send_private_message(user_id: int, message: str):
         })
         await global_websocket.send(response_json)
 
-def get_weather(adcode: str = "310110") -> dict:
+def get_weather(adcode = "310110"):
     result = requests.get(f"https://restapi.amap.com/v3/weather/weatherInfo?key={AMAP_KEY}&city={adcode}&extensions=base").json()
     return {"time": time.time(), "weather": result["lives"][0]["weather"], "temperature": result["lives"][0]["temperature"], "humidity": result["lives"][0]["humidity"], "windpower": result["lives"][0]["windpower"]}
 
-def get_poem_and_tip() -> tuple[str, str]:
+def get_poem_and_tip():
     result1 = requests.get("https://v1.jinrishici.com/all.json").json()
     result2 = requests.get("https://v1.hitokoto.cn").json()
     return f"{result1['content']} - {result1['origin']}", result2["hitokoto"]
 
-def get_emo_result_loop(task_id) -> dict:
+def get_emo_result_loop(task_id):
     '''emo模型结果获取'''
     while True:
         url = f"https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}"
@@ -540,7 +549,7 @@ def get_emo_result_loop(task_id) -> dict:
         else:
             return {"status": 0, "result": result["output"]["message"]}
 
-def get_username(id: int, times: int = 0) -> str:
+def get_username(id, times = 0):
     try:
         result = requests.post("http://127.0.0.1:3001/get_stranger_info", json={"user_id": id}).json()
         data = result["data"]["nick"]
@@ -556,7 +565,7 @@ def get_username(id: int, times: int = 0) -> str:
             print("---")
             return None
 
-def draw_tarot_cards(spread_type: str = 'three_card', custom_draw = None) -> list[dict]:
+def draw_tarot_cards(spread_type = 'three_card', custom_draw = None):
     # 塔罗牌生成器
     def create_deck():
         major_arcana = [
@@ -612,7 +621,7 @@ def draw_tarot_cards(spread_type: str = 'three_card', custom_draw = None) -> lis
     
     return drawn[:draw_num]  # 确保精确返回请求数量
 
-def parse_to_narrative(card_list) -> str:
+def parse_to_narrative(card_list):
     parts = []
     for i, card in enumerate(card_list, 1):
         desc = f"第{i}张牌是[{card['name']}]"
@@ -623,12 +632,12 @@ def parse_to_narrative(card_list) -> str:
         parts.append(desc)
     return " ".join(parts)[:-1]
 
-def get_message(id: int) -> dict:
+def get_message(id):
     result = requests.post("http://127.0.0.1:3001/get_msg", json={"message_id": id}).json()
     data = result["data"]["message"]
     return data
 
-def get_group_members(group_id: int) -> list[int]:
+def get_group_members(group_id):
     result = requests.post("http://127.0.0.1:3001/get_group_member_list", json={"group_id": group_id,"no_cache": False}).json()
     members = []
     for i in result["data"]:
@@ -639,7 +648,7 @@ def get_group_members(group_id: int) -> list[int]:
     members.remove(SELF_ID_INT)
     return members
 
-def formated_bili_summary(text: str, model: str=DEFAULT_MODEL) -> str:
+def formated_bili_summary(text, model=DEFAULT_MODEL):
     user_input = text.replace(".bil ", "")
     data = get_bili_text(user_input)
     status = data["status"]
@@ -659,14 +668,14 @@ def formated_bili_summary(text: str, model: str=DEFAULT_MODEL) -> str:
     elif status == 2:
         return f'''[CQ:image,file={data["pic_url"]}]标题: {data["title"]}\n简介: {data["desc"]}\n标签: {data["tag"]}'''
 
-def get_foward_messages(id: int) -> list[dict]:
+def get_foward_messages(id):
     '''返回messages'''
     result = requests.post("http://127.0.0.1:3001/get_forward_msg", json={"message_id": id}).json()
     data = result["data"]["messages"]
     return data
 
 
-async def send_group_message(group_id: int, message: str):
+async def send_group_message(group_id, message):
     """发送群消息"""
     if message:
         data = json.dumps({
@@ -679,25 +688,55 @@ async def send_group_message(group_id: int, message: str):
         await global_websocket.send(data)
 
 
+# 全局线程池
+executor = ThreadPoolExecutor(max_workers=20)  # 根据需求调整线程数
+
 async def handler(websocket):
-    """消息处理器"""
     global global_websocket
     global_websocket = websocket
     async for message in websocket:
         data = json.loads(message)
         if "message_type" in data:
             if data["message_type"] == "group":
-                await group_message_handler(data["message"], data["group_id"], data["sender"]["nickname"], data["sender"]["user_id"])
+                executor.submit(group_message_handler,data["message"],data["group_id"],data["sender"]["nickname"],data["user_id"])
             elif data["message_type"] == "private":
-                await private_message_handler(data["message"], data["user_id"])
+                executor.submit(private_message_handler,data["message"],data["user_id"])
 
+def group_message_handler(messages, group_id, username, sender_id):
+    if group_id not in groups:
+        groups[group_id] = Handle_group_message(group_id)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(groups[group_id].process(messages, username, sender_id))
+    finally:
+        loop.close()
+
+def private_message_handler(messages, user_id):
+    if user_id not in users:
+        users[user_id] = Handle_private_message(user_id)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(users[user_id].process(messages))
+    finally:
+        loop.close()
 
 def start_server():
-    global event_loop
     event_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(event_loop)
     start_wss_server_task = websockets.serve(handler, "0.0.0.0", 8080)
     event_loop.run_until_complete(start_wss_server_task)
-    event_loop.run_forever()
+    try:
+        event_loop.run_forever()
+    except KeyboardInterrupt:
+        print("已关闭")
+    except Exception as e:
+        print("发生错误")
+        print(e)
+        print("---")
+    finally:
+        executor.shutdown()
+        event_loop.close()
 
 start_server()
