@@ -47,8 +47,6 @@ class WebSpider:
         """获取页面内容"""
         try:
             response = get_page_source(url)
-            with open("page.html", "w", encoding="utf-8") as f:
-                f.write(response)
             return response
         except:
             return None
@@ -117,8 +115,7 @@ class WebSpider:
         return get_page_text(url)
 
 def get_page_text(url):
-    # 使用 GeckoDriverManager 自动管理 GeckoDriver 的安装和路径
-    service = Service()
+    service = Service(executable_path="./assets/geckodriver.exe")
     options = Options()
     
     # 禁用自动化控制的特征
@@ -127,10 +124,8 @@ def get_page_text(url):
     options.add_argument("--headless")
     # 创建 Firefox WebDriver 实例
     driver = webdriver.Firefox(service=service, options=options)
-
     try:
         driver.get(url)
-        time.sleep(5)
         text = driver.find_element(By.TAG_NAME, 'body').text
     finally:
         text = driver.find_element(By.TAG_NAME, 'body').text
@@ -140,8 +135,7 @@ def get_page_text(url):
         return text
 
 def get_page_source(url):
-    # 使用 GeckoDriverManager 自动管理 GeckoDriver 的安装和路径
-    service = Service()
+    service = Service(executable_path="./assets/geckodriver.exe")
     options = Options()
     options.set_preference("dom.webdriver.enabled", False)
     options.set_preference("useAutomationExtension", False)
@@ -151,7 +145,6 @@ def get_page_source(url):
 
     try:
         driver.get(url)
-        time.sleep(5)
         # 等待页面加载完成
     finally:
         page_source = driver.page_source

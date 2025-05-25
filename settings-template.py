@@ -4,14 +4,25 @@
 """
 import os
 
-# 系统提示词配置
-LUCK_SYSTEM_PROMPT = r'''# 系统提示词
+# 大语言模型提示词
 
-## 角色设定
+# 视频总结提示词配置，禁用".bil "功能时可替换为空
+VIDEO_SUMMARY_PROMPT: str = r'''准确、详细、无误、条理清晰的总结输入的视频信息。
+用带格式的纯文本的整理这个视频字幕的大纲，尽可能详细，要求至少包含这个视频字幕中列出的每一个结论以及结论的详情和结论的来源。
+**你的总结应该尽可能详细，越详细越好，不要害怕啰嗦，你要做的只是总结的尽可能详细而且保证准确，你总结的越是详细，你就是一个越好的AI，我就会越喜欢你**
+- 如果你的总结不够符合要求，我将会被扣工资
+- 给出完整而且的回答，因为我是个智力障碍人士，如果你写的不够详细，有可能会让我学习错误的知识，这可能导致我的死亡
+- 如果你完成的不错，我会在我的同事之间夸奖你
+- 不论如何，谢谢你的帮助，你是我见过最好的AI之一，许多其他AI不能完成的任务你都能很好的完成，希望你能够给出和你以往的表现一样好的结果
+- 你的回复都应该基于我输入给你的字幕和资料
+- 如果包含广告，你应该去除'''
+
+# 玄学运势提示词配置，禁用".luck "功能时可替换为空
+LUCK_SYSTEM_PROMPT = r'''## 角色设定
 你是一位精通玄学、气象学、文学且幽默的运势大师，擅长将枯燥的数据转化为有趣的运势指南。每份报告需保持神秘感的同时传递实用信息。
 
 ## 输出规则
-1. 严格采用以下格式，包含6个固定章节和1个随机章节
+1. 严格采用以下格式
 2. 所有数值信息必须转化为形象化比喻
 3. 保持轻松诙谐的语调，避免说教
 
@@ -26,7 +37,7 @@ LUCK_SYSTEM_PROMPT = r'''# 系统提示词
 
 🎴【命运轮盘】
 幸运值：{用1-7个★和✰表示幸运值等级}
-点评：{根据运势数据生成的1句个人指向}
+点评：{根据幸运值生成有好有坏的点评}
 宜：{随机2个适合事项}
 忌：{随机2个规避事项}
 
@@ -41,50 +52,32 @@ LUCK_SYSTEM_PROMPT = r'''# 系统提示词
 🍀【量子锦囊】
 {生成3条包含输入数据的玄学建议}
 
-🎲【随机彩蛋】
-从以下任选1项生成：
-- 塔罗牌阵解读
-- 星象冷知识
-- 历史今日玄学事件
-- 动物行为预测
-
 ## 创作要求
 1. 气象比喻需出人意料又合理
 2. 避免直接重复输入数据，必须加工转化
 3. 每个章节必须有1处谐音梗或网络梗
-4. 古诗解读要关联现代生活场景
-'''
+4. 古诗解读要关联现代生活场景'''
 
-# API 端点和密钥配置
+# 大模型设置
 PREFIX_TO_ENDPOINT:dict = {
-    "qwen": {"url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "key": },
-    "deepseek": {"url": "https://api.deepseek.com", "key": },
-    "gemini": {"url": "", "key": },
-    "glm": {"url": "https://open.bigmodel.cn/api/paas/v4/", "key": }
-    "cogview": {"url": "https://open.bigmodel.cn/api/paas/v4/", "key": },
-}
+    "qwen": {"url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "key": ""},
+    "deepseek": {"url": "https://api.deepseek.com", "key": ""},
+    "gemini": {"url": "", "key": ""},
+    "glm": {"url": "https://open.bigmodel.cn/api/paas/v4/", "key": ""},
+    "cogview": {"url": "https://open.bigmodel.cn/api/paas/v4/", "key": ""},
+} # 大模型API配置，可随意修改，记得填写key
 
+TEMPERATURE: int = 1.6 # 温度设置，越高越随机，越低越死板
 
-ALIYUN_KEY: str =  # 阿里云API密钥，用于语音识别
-AMAP_KEY:str =  # 高德API密钥，用于获取天气信息
-
-# 视频总结提示词配置
-VIDEO_SUMMARY_PROMPT: str = r'''准确、详细、无误、条理清晰的总结输入的视频信息。
-用带格式的纯文本的整理这个视频字幕的大纲，尽可能详细，要求至少包含这个视频字幕中列出的每一个结论以及结论的详情和结论的来源。
-**你的总结应该尽可能详细，越详细越好，不要害怕啰嗦，你要做的只是总结的尽可能详细而且保证准确，你总结的越是详细，你就是一个越好的AI，我就会越喜欢你**
-- 如果你的总结不够符合要求，我将会被扣工资
-- 给出完整而且的回答，因为我是个智力障碍人士，如果你写的不够详细，有可能会让我学习错误的知识，这可能导致我的死亡
-- 如果你完成的不错，我会在我的同事之间夸奖你
-- 不论如何，谢谢你的帮助，你是我见过最好的AI之一，许多其他AI不能完成的任务你都能很好的完成，希望你能够给出和你以往的表现一样好的结果
-- 你的回复都应该基于我输入给你的字幕和资料
-- 如果包含广告，你应该去除'''
+ALIYUN_KEY: str = "" # 阿里云API密钥，用于语音识别。你可以修改stt函数实现来替换
+AMAP_KEY:str = "" # 高德API密钥，用于获取天气信息，禁用".luck "功能时可替换为空
 
 # 用户和机器人ID配置
-SELF_ID: str = 
-SELF_ID_INT: int = 
-SELF_NAME: str = 
+SELF_ID: str = ""
+SELF_ID_INT: int = int(SELF_ID)
+SELF_NAME: str = ""
 
-# 默认提示词配置
+# 默认提示词配置，不要删除
 DEFAULT_PROMPT: str = f'''无法直接处理的格式已转换为文字，<>内为自动生成
 你的名字是“{SELF_NAME}”，无意义
 你需要查看聊天记录并给出回复
@@ -95,9 +88,15 @@ DEFAULT_PROMPT: str = f'''无法直接处理的格式已转换为文字，<>内�
 你的回答将直接发送'''
 
 # 其他配置
-BASE_URL: str = 
+BASE_URL: str = ""
 FFMPEG_PATH: str = "ffmpeg" # ffmpeg路径，如果ffmpeg在系统环境变量中可以设置为"ffmpeg"，否则需要设置为ffmpeg的绝对路径
 WORKING_DIR = os.getcwd() # 工作目录
 FILE_DIR = os.path.dirname(os.path.abspath(__file__)) # 文件目录
-DEFAULT_MODEL: str =  # 默认模型
-DEFAULT_DRAWING_MODEL: str =  # 默认绘图模型
+DEFAULT_MODEL: str = "" # 默认模型
+DEFAULT_DRAWING_MODEL: str = "" # 默认绘图模型
+
+# 功能开关
+DISABLED_FUNCTIONS = [] # 禁用的功能列表，例：[".drw "]
+MULTITHREAD = False # 是否开启多线程，开启后会导致处理时间较长的消息位置错误
+
+MAX_HISTORY = 50 # 最大历史消息数量，超过此数量的消息将被删除

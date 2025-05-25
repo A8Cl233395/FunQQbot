@@ -13,7 +13,7 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 from settings import *
 dashscope.api_key = ALIYUN_KEY
 
-def ask_ai(prompt, content, model=DEFAULT_MODEL):
+def ask_ai(prompt, content, model=DEFAULT_MODEL, temperature=TEMPERATURE):
     url = PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"]
     api_key = PREFIX_TO_ENDPOINT[model.split("-")[0]]["key"]
     oclient = OpenAI(api_key=api_key, base_url=url)
@@ -25,11 +25,11 @@ def ask_ai(prompt, content, model=DEFAULT_MODEL):
         model=model,
         messages=messages,
         stream=False,
+        temperature=temperature,
     )
     return response.choices[0].message.content
 
-
-def ai(messages,model=DEFAULT_MODEL):
+def ai(messages,model=DEFAULT_MODEL, temperature=TEMPERATURE):
     url = PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"]
     api_key = PREFIX_TO_ENDPOINT[model.split("-")[0]]["key"]
     oclient = OpenAI(api_key=api_key, base_url=url)
@@ -37,6 +37,7 @@ def ai(messages,model=DEFAULT_MODEL):
         model=model,
         messages=messages,
         stream=False,
+        temperature=temperature,
     )
     return response.choices[0].message.content
 
@@ -258,8 +259,8 @@ class CodeExecutor:
                         response_content = get_page_text(arguments["content"])
                     else:
                         response_content = "访问搜索结果应输入数字！"
-                except:
-                    response_content = "链接无法访问！"
+                except Exception as e:
+                    response_content = f"链接无法访问！\n{e}"
             return_text = response_content[:200].replace("\n", " ")
 
         self.status = 3

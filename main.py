@@ -14,13 +14,6 @@ groups = {}
 users = {}
 weather = {"time": 0}
 
-first_time = False
-model_list_cache = {}
-result = fetch_db("SELECT * FROM mdesc")
-for i in result:
-    model_list_cache[i[0]] = {"des": i[1], "vision": i[2]}
-print("启动中...")
-
 def messages_to_text(messages, username=""):
     """
     将消息列表转换为文本
@@ -56,7 +49,7 @@ def messages_to_text(messages, username=""):
                 case "record":
                     time.sleep(1)
                     pos = message["data"]["path"]
-                    silk_to_wav(pos, rf".\file.wav")
+                    silk_to_wav(pos, "./files/file.wav")
                     requests.get("https://localhost:4856/sec_check?arg=file.wav", verify=False)
                     text = stt(f"https://srv.{BASE_URL}:4856/download_fucking_file?filename=file.wav")
                     output_text += f" {text}"
@@ -119,10 +112,10 @@ def ai_reply(messages, model, prompt):
     splited = result.split("<split>")
     for i in range(len(splited)):
         real_text = splited[i]
-        if real_text[:5] == f"{SELF_NAME}：": # 处理多出来的名字
-            splited[i] = real_text[5:]
-        elif real_text[:6] == f"{SELF_NAME}: ":
-            splited[i] = real_text[6:]
+        if real_text[:len(SELF_NAME)+1] == f"{SELF_NAME}：": # 处理多出来的名字
+            splited[i] = real_text[len(SELF_NAME)+1:]
+        elif real_text[:len(SELF_NAME)+2] == f"{SELF_NAME}: ":
+            splited[i] = real_text[len(SELF_NAME)+2:]
         splited[i] = splited[i].strip()
     return splited
 
@@ -161,6 +154,9 @@ class Handle_group_message:
             ".ping": lambda a, b: self.ping(),
             ".drw ": lambda a, b: self.draw(a),
         }
+        for i in DISABLED_FUNCTIONS: # 禁用功能
+            if i in self.mappings:
+                self.mappings.pop(i)
         self.last_time = 0
         self.delete = True # 阻止删除消息，使用大模型缓存
 
@@ -190,7 +186,7 @@ class Handle_group_message:
             self.delete = True
             self.stored_messages.append("<时间间隔长>")
         self.last_time = time.time() # 更新最后聊天时间
-        if len(self.stored_messages) > 50 and self.delete: # 超过50条消息清理
+        if len(self.stored_messages) > MAX_HISTORY and self.delete: # 超过50条消息清理
             self.stored_messages.pop(0)
         # 被提及
         if data[1]:
@@ -225,17 +221,17 @@ class Handle_group_message:
         current_time_raw = time.localtime()
         if current_time_int - weather["time"] > 3600:
             weather = get_weather()
-        content = LUCK_SYSTEM_PROMPT
-        poem, tip = get_poem_and_tip()
-        content += f'''现在时间{current_time_raw.tm_year}年{current_time_raw.tm_mon}月{current_time_raw.tm_mday}日{current_time_raw.tm_hour}时
+        poem = get_poem()
+        tip = get_tip()
+        content = f'''现在时间{current_time_raw.tm_year}年{current_time_raw.tm_mon}月{current_time_raw.tm_mday}日{current_time_raw.tm_hour}时
 天气: {weather["weather"]}
 温度: {weather["temperature"]}
 湿度: {weather["humidity"]}
 风力: {weather["windpower"]}
 幸运值: {random.randint(1, 7)}/7
-诗: {poem}
-一言: {tip}'''
-        result = ask_ai("", content, model=self.model)
+诗: {get_poem()}
+一言: {get_tip()}'''
+        result = ask_ai(LUCK_SYSTEM_PROMPT, content, model=self.model)
         result = f"[CQ:at,qq={sender_id}] 你的每日运势从炉管出来了💥\n" + result
         return [result]
 
@@ -262,14 +258,14 @@ class Handle_group_message:
             if self.original_messages[-2]["type"] == "file": #检查文件
                 if self.original_messages[-2]["data"]["file"][-4:] in [".wav", ".mp3"]: #检查是否为音频文件
                     pic = requests.get(self.original_messages[-3]["data"]["url"].replace("https", "http"))
-                    with open("files/file_vid.jpg", "wb") as f:
+                    with open("./files/file_vid.jpg", "wb") as f:
                         f.write(pic.content)
                     requests.get(f"https://localhost:4856/sec_check?arg=file_vid.jpg", verify=False)
                     requests.get(f"https://localhost:4856/sec_check?arg=file_vid.jpg", verify=False)
                     detect = emo_detect(f"https://srv.{BASE_URL}:4856/download_fucking_file?filename=file_vid.jpg")
                     if detect["output"]["check_pass"]:
                         response = requests.post("http://127.0.0.1:3001/get_file", json={"file_id": self.original_messages[-2]["data"]["file_id"]}).json()
-                        shutil.copy(response["data"]["file"], rf".\files\file_vid{self.original_messages[-2]['data']['file'][-4:]}")
+                        shutil.copy(response["data"]["file"], rf"./files/file_vid{self.original_messages[-2]['data']['file'][-4:]}")
                         requests.get(f"https://localhost:4856/sec_check?arg=file_vid{self.original_messages[-2]['data']['file'][-4:]}", verify=False)
                         requests.get(f"https://localhost:4856/sec_check?arg=file_vid.jpg", verify=False)
                         requests.get(f"https://localhost:4856/sec_check?arg=file_vid{self.original_messages[-2]['data']['file'][-4:]}", verify=False)
@@ -354,7 +350,10 @@ class Handle_private_message:
             ".ping": lambda a: self.ping(),
             ".chat": lambda a: self.toggle_chat(),
             ".drw ": lambda a: self.draw(a),
-            }
+        }
+        for i in DISABLED_FUNCTIONS: # 禁用功能
+            if i in self.mappings:
+                self.mappings.pop(i)
     
     async def process(self, messages):
         """
@@ -473,14 +472,14 @@ class Handle_private_message:
                     self.chat_instance.append_message({"type": "text", "text": f"<卡片: {text['prompt']}>"}, to_last=True)
                 case "file":
                     response = requests.post("http://127.0.0.1:3001/get_file", json={"file_id": message["data"]["file_id"]}).json()
-                    shutil.copy(response["data"]["file"], rf".\temp\{response['data']['file_name']}")
-                    self.chat_instance.append_message({"type": "text", "text": f"<文件: .\{response['data']['file_name']}>"}, to_last=True)
+                    shutil.copy(response["data"]["file"], rf"./temp/{response['data']['file_name']}")
+                    self.chat_instance.append_message({"type": "text", "text": f"<文件: ./{response['data']['file_name']}>"}, to_last=True)
                 case "video":
                     self.chat_instance.append_message({"type": "text", "text": "<视频>"}, to_last=True)
                 case "record":
                     asyncio.sleep(1)
                     pos = message["data"]["path"]
-                    silk_to_wav(pos, r".\files\file.wav")
+                    silk_to_wav(pos, "./files/file.wav")
                     requests.get("https://localhost:4856/sec_check?arg=file.wav", verify=False)
                     text = stt(f"https://srv.{BASE_URL}:4856/download_fucking_file?filename=file.wav")
                     self.chat_instance.append_message({"type": "text", "text": text}, to_last=True)
@@ -524,10 +523,12 @@ def get_weather(adcode = "310110"):
     result = requests.get(f"https://restapi.amap.com/v3/weather/weatherInfo?key={AMAP_KEY}&city={adcode}&extensions=base").json()
     return {"time": time.time(), "weather": result["lives"][0]["weather"], "temperature": result["lives"][0]["temperature"], "humidity": result["lives"][0]["humidity"], "windpower": result["lives"][0]["windpower"]}
 
-def get_poem_and_tip():
-    result1 = requests.get("https://v1.jinrishici.com/all.json").json()
-    result2 = requests.get("https://v1.hitokoto.cn").json()
-    return f"{result1['content']} - {result1['origin']}", result2["hitokoto"]
+def get_poem():
+    result = requests.get("https://v1.jinrishici.com/all.json").json()
+    return f"{result['content']} - {result['origin']}"
+
+def get_tip():
+    return requests.get("https://v1.hitokoto.cn").json()['hitokoto']
 
 def get_emo_result_loop(task_id):
     '''emo模型结果获取'''
@@ -678,9 +679,19 @@ async def send_group_message(group_id, message):
         })
         await global_websocket.send(data)
 
+if MULTITHREAD:
+    executor = ThreadPoolExecutor(max_workers=20)
 
-# 全局线程池
-executor = ThreadPoolExecutor(max_workers=20)  # 根据需求调整线程数
+async def handler_multithread(websocket):
+    global global_websocket
+    global_websocket = websocket
+    async for message in websocket:
+        data = json.loads(message)
+        if "message_type" in data:
+            if data["message_type"] == "group":
+                executor.submit(group_message_handler, data["message"], data["group_id"], data["sender"]["nickname"], data["user_id"])
+            elif data["message_type"] == "private":
+                executor.submit(private_message_handler, data["message"], data["user_id"])
 
 async def handler(websocket):
     global global_websocket
@@ -689,9 +700,13 @@ async def handler(websocket):
         data = json.loads(message)
         if "message_type" in data:
             if data["message_type"] == "group":
-                executor.submit(group_message_handler,data["message"],data["group_id"],data["sender"]["nickname"],data["user_id"])
+                if data["group_id"] not in groups:
+                    groups[data["group_id"]] = Handle_group_message(data["group_id"])
+                await groups[data["group_id"]].process(data["message"], data["sender"]["nickname"], data["user_id"])    
             elif data["message_type"] == "private":
-                executor.submit(private_message_handler,data["message"],data["user_id"])
+                if data["user_id"] not in users:
+                    users[data["user_id"]] = Handle_private_message(data["user_id"])
+                await users[data["user_id"]].process(data["message"])
 
 def group_message_handler(messages, group_id, username, sender_id):
     if group_id not in groups:
@@ -716,18 +731,22 @@ def private_message_handler(messages, user_id):
 def start_server():
     event_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(event_loop)
-    start_wss_server_task = websockets.serve(handler, "0.0.0.0", 8080)
+    if MULTITHREAD:
+        start_wss_server_task = websockets.serve(handler_multithread, "0.0.0.0", 8080)
+    else:
+        start_wss_server_task = websockets.serve(handler, "0.0.0.0", 8080)
     event_loop.run_until_complete(start_wss_server_task)
     try:
         event_loop.run_forever()
-    except KeyboardInterrupt:
-        print("已关闭")
-    except Exception as e:
-        print("发生错误")
-        print(e)
-        print("---")
     finally:
-        executor.shutdown()
+        if MULTITHREAD:
+            executor.shutdown()
         event_loop.close()
 
-start_server()
+if __name__ == "__main__":
+    model_list_cache = {}
+    result = fetch_db("SELECT * FROM mdesc")
+    for i in result:
+        model_list_cache[i[0]] = {"des": i[1], "vision": i[2]}
+    print("启动中...")
+    start_server()

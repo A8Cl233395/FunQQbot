@@ -51,7 +51,7 @@ def upload_file():
         file = request.files.get('file')
         if file:
             fileformat = file.filename.split('.')[-1]
-            file.save(f'C:/Users/Admin/Desktop/qqbot/2/files/tempfile.{fileformat}')
+            file.save(f'{WORKING_DIR}/files/tempfile.{fileformat}')
             allowed.append(f'tempfile.{fileformat}')
             return "ok"
     return "error"

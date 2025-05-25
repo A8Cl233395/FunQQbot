@@ -83,7 +83,7 @@ def search_minecraft_server(host, port):
 def silk_to_wav(input, output):
     #FUCK U TENCENT
     command = [
-        r".\assets\silk_v3_decoder.exe",
+        "./assets/silk_v3_decoder.exe",
         input,
         "file.pcm"
     ]
@@ -208,7 +208,6 @@ def get_saucenao_api(url):
                     result["creator"] = data["data"]["creator"]
                 results.append(result)
         return results
-
 
 def fetch_db(prompt, data=None):
     conn = mysql.connector.connect(
