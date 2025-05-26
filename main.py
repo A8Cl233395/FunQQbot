@@ -14,20 +14,13 @@ groups = {}
 users = {}
 weather = {"time": 0}
 
-def messages_to_text(messages, username=""):
-    """
-    将消息列表转换为文本
-
-    Args:
-        messages: 消息列表
-        username: 用户名
-        
-    Returns:
-        如果username为空,返回转换后的文本
-        否则返回(username + 文本, 是否被@, 原始文本)的元组
-    """
+def messages_to_text(data):
     output_text = ""
     is_mentioned = False
+
+    username = data["sender"]["nickname"]
+    username_cache[data["sender"]["user_id"]] = username
+    messages = data["message"]
     try:
         for message in messages:
             match message["type"]:
@@ -64,7 +57,7 @@ def messages_to_text(messages, username=""):
                     output_text += f" @{name}"
                 case "reply":
                     reply_data = get_message(message["data"]["id"])
-                    text = messages_to_text(reply_data)
+                    text = messages_to_text(reply_data)[0]
                     output_text += f" <回复: {text}>"
                 case "face":
                     output_text += " <表情>"
@@ -72,7 +65,7 @@ def messages_to_text(messages, username=""):
                     data = get_foward_messages(message["data"]["id"])
                     text = " "
                     for i in data:
-                        text += messages_to_text(i["message"], i["sender"]["nickname"])[0] + "\n"
+                        text += messages_to_text(i)[0] + "\n"
                     output_text += f" <合并转发开始>\n{text}\n<合并转发结束>"
                 case "markdown":
                     output_text += f" <markdown: {message['data']['content']}>"
@@ -81,9 +74,7 @@ def messages_to_text(messages, username=""):
                     print("发生错误")
                     print(message)
                     print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-        if username:
-            return username+ ": " + output_text[1:], is_mentioned, output_text[1:]
-        return output_text[1:]
+        return username + ": " + output_text[1:], is_mentioned, output_text[1:]
         
     except Exception as e:
         print("---message_to_text---")
@@ -119,10 +110,11 @@ def ai_reply(messages, model, prompt):
         splited[i] = splited[i].strip()
     return splited
 
-def process_first_message_text(messages):
+def process_first_message_text(data):
     """处理消息列表中的第一个消息文本内容"""
+    messages = data["message"]
     first_message = messages[0]
-    if first_message.get("type") == "text":  # 检查第一个消息是否为文本内容
+    if first_message["type"] == "text":  # 检查第一个消息是否为文本内容
         return first_message["data"]["text"]
     return ""
 
@@ -157,24 +149,33 @@ class Handle_group_message:
         for i in DISABLED_FUNCTIONS: # 禁用功能
             if i in self.mappings:
                 self.mappings.pop(i)
-        self.last_time = 0
+        self.last_time = time.time()
         self.delete = True # 阻止删除消息，使用大模型缓存
+        if IDLE_REPLY_TIME:
+            self.idle_task = asyncio.create_task(self.check_idle())  # 添加定时器任务
+        self.bot_sent = False
 
-    async def process(self, messages, username, sender_id):
-        """
-        处理群消息
-        
-        Args:
-            messages: 消息列表 
-            username: 发送者用户名
-            sender_id: 发送者QQ号
-        """
+    async def check_idle(self):
+        """检查群是否长时间无人发消息"""
+        while True:
+            await asyncio.sleep(10)
+            if time.time() - self.last_time > IDLE_REPLY_TIME and not self.bot_sent:
+                for i in ai_reply(self.stored_messages, self.model, self.prompt):
+                    self.stored_messages.append(f"{SELF_NAME}: {i}")
+                    await send_group_message(self.group_id, i)
+                    await asyncio.sleep(0.1)
+                self.bot_sent = True
+                self.delete = False
+                self.last_time = time.time()  # 重置最后聊天时间
+
+
+    async def process(self, messages):
+        sender_id = messages["sender"]["user_id"]
         message_send = []
-        username_cache[sender_id] = username
         self.original_messages.extend(messages) # 记录原始消息
         if len(self.original_messages) > 10: # 缓存消息数量限制（原始）
             self.original_messages = self.original_messages[-10:]
-        data = messages_to_text(messages, username)
+        data = messages_to_text(messages)
         text = data[0]
         plain_text = data[2]
         self.stored_messages.append(text)
@@ -185,6 +186,7 @@ class Handle_group_message:
         elif time_to_last > 120: # 超过2分钟标记
             self.delete = True
             self.stored_messages.append("<时间间隔长>")
+        self.bot_sent = False
         self.last_time = time.time() # 更新最后聊天时间
         if len(self.stored_messages) > MAX_HISTORY and self.delete: # 超过50条消息清理
             self.stored_messages.pop(0)
@@ -221,8 +223,6 @@ class Handle_group_message:
         current_time_raw = time.localtime()
         if current_time_int - weather["time"] > 3600:
             weather = get_weather()
-        poem = get_poem()
-        tip = get_tip()
         content = f'''现在时间{current_time_raw.tm_year}年{current_time_raw.tm_mon}月{current_time_raw.tm_mday}日{current_time_raw.tm_hour}时
 天气: {weather["weather"]}
 温度: {weather["temperature"]}
@@ -356,12 +356,6 @@ class Handle_private_message:
                 self.mappings.pop(i)
     
     async def process(self, messages):
-        """
-        处理私聊消息
-        
-        Args:
-            messages: 消息列表
-        """
         text = process_first_message_text(messages)
         command_handled = False
         if text[:1] == '.':
@@ -371,7 +365,6 @@ class Handle_private_message:
                     await send_private_message(self.user_id, i)
                     await asyncio.sleep(0.1)
                 command_handled = True
-                
         # 处理聊天模式
         if self.chatting and not command_handled:
             await self.chat(messages)
@@ -630,8 +623,7 @@ def parse_to_narrative(card_list):
 
 def get_message(id):
     result = requests.post("http://127.0.0.1:3001/get_msg", json={"message_id": id}).json()
-    data = result["data"]["message"]
-    return data
+    return result["data"]
 
 def get_group_members(group_id):
     result = requests.post("http://127.0.0.1:3001/get_group_member_list", json={"group_id": group_id}).json()
@@ -702,11 +694,11 @@ async def handler(websocket):
             if data["message_type"] == "group":
                 if data["group_id"] not in groups:
                     groups[data["group_id"]] = Handle_group_message(data["group_id"])
-                await groups[data["group_id"]].process(data["message"], data["sender"]["nickname"], data["user_id"])    
+                await groups[data["group_id"]].process(data)
             elif data["message_type"] == "private":
                 if data["user_id"] not in users:
                     users[data["user_id"]] = Handle_private_message(data["user_id"])
-                await users[data["user_id"]].process(data["message"])
+                await users[data["user_id"]].process(data)
 
 def group_message_handler(messages, group_id, username, sender_id):
     if group_id not in groups:

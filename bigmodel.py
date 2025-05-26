@@ -307,7 +307,16 @@ def url_to_b64(url: str) -> str:
     img_base64 = base64.b64encode(img_byte_arr).decode('utf-8')
     return img_base64
 
+# 全局缓存变量
+ocr_cache = {}
+
 def ocr(url: str) -> str:
+    global ocr_cache
+    # 检查缓存
+    if url in ocr_cache:
+        return ocr_cache[url]
+    
+    # 调用OCR服务
     img_base64 = url_to_b64(url)
     json_data = json.dumps({
         "base64": img_base64,
@@ -319,7 +328,11 @@ def ocr(url: str) -> str:
             "data.format": "text",
         }
     })
-    return requests.post('http://127.0.0.1:1224/api/ocr', headers={"Content-Type": "application/json"}, data = json_data).json()["data"]
+    result = requests.post('http://127.0.0.1:1224/api/ocr', headers={"Content-Type": "application/json"}, data=json_data).json()["data"]
+    
+    # 缓存结果
+    ocr_cache[url] = result
+    return result
 
 def emo_detect(img_url, ratio="1:1"):
     '''返回检测结果 json'''
@@ -338,7 +351,7 @@ def emo(img_url, audio_url, face_bbox, ext_bbox, style_level="active"):
     result = requests.post(url, headers=headers, data=json_data).json()
     return result["output"]["task_id"]
 
-def draw(prompt, model="cogview-3-flash", size="1024x1024"):
+def draw(prompt, model=DEFAULT_DRAWING_MODEL, size="1024x1024"):
     '''返回图像链接'''
     client = OpenAI(api_key=PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"], base_url=PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"])
     result = client.images.generate(

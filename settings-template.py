@@ -91,7 +91,6 @@ DEFAULT_PROMPT: str = f'''无法直接处理的格式已转换为文字，<>内�
 BASE_URL: str = ""
 FFMPEG_PATH: str = "ffmpeg" # ffmpeg路径，如果ffmpeg在系统环境变量中可以设置为"ffmpeg"，否则需要设置为ffmpeg的绝对路径
 WORKING_DIR = os.getcwd() # 工作目录
-FILE_DIR = os.path.dirname(os.path.abspath(__file__)) # 文件目录
 DEFAULT_MODEL: str = "" # 默认模型
 DEFAULT_DRAWING_MODEL: str = "" # 默认绘图模型
 
