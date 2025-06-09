@@ -180,6 +180,7 @@ class Handle_group_message:
         data = messages_to_text(messages)
         text = data[0]
         plain_text = data[2]
+        is_mentioned = data[1]
         self.stored_messages.append(text)
         time_to_last = time.time() - self.last_time
         if time_to_last > 3600: # 超过1小时清理
@@ -199,7 +200,7 @@ class Handle_group_message:
                 message_send.append(f"插件执行失败，已在本次移除\n{e}")
                 self.plugin = None
         # 被提及
-        if data[1]:
+        if is_mentioned:
             self.delete = False
             result = ai_reply(self.stored_messages, self.model, self.prompt)
             message_send.extend(result)
