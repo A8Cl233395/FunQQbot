@@ -21,67 +21,59 @@ def messages_to_text(data):
     username = data["sender"]["nickname"]
     username_cache[data["sender"]["user_id"]] = username
     messages = data["message"]
-    try:
-        for message in messages:
-            match message["type"]:
-                case "text":
-                    message_text = message["data"]["text"]
-                    if f"@{SELF_NAME}" in message_text:
-                        is_mentioned = True
-                    output_text += f" {message_text}"
-                case "image":
-                    image_text = ocr(message["data"]["url"].replace("https", "http"))
-                    output_text += f" <图片文字: {image_text}>"
-                case "json":
-                    text = json.loads(message["data"]["data"])
-                    output_text += f" <卡片: {text['prompt']}>"
-                case "file":
-                    output_text += f" <文件名: {message['data']['file']}>"
-                case "video":
-                    output_text += " <视频>"
-                case "record":
-                    time.sleep(1)
-                    pos = message["data"]["path"]
-                    silk_to_wav(pos, "./files/file.wav")
-                    requests.get("https://localhost:4856/sec_check?arg=file.wav", verify=False)
-                    text = stt(f"https://srv.{BASE_URL}:4856/download_fucking_file?filename=file.wav")
-                    output_text += f" {text}"
-                case "at":
-                    qq_id = message["data"]["qq"]
-                    if qq_id == SELF_ID:
-                        is_mentioned = True
-                    if qq_id in username_cache:
-                        name = username_cache[qq_id]
-                    else:
-                        name = username_cache[qq_id] = get_username(qq_id)
-                    output_text += f" @{name}"
-                case "reply":
-                    reply_data = get_message(message["data"]["id"])
-                    text = messages_to_text(reply_data)[0]
-                    output_text += f" <回复: {text}>"
-                case "face":
-                    output_text += " <表情>"
-                case "forward":
-                    data = get_foward_messages(message["data"]["id"])
-                    text = " "
-                    for i in data:
-                        text += messages_to_text(i)[0] + "\n"
-                    output_text += f" <合并转发开始>\n{text}\n<合并转发结束>"
-                case "markdown":
-                    output_text += f" <markdown: {message['data']['content']}>"
-                case _:
-                    output_text += f" <未知>"
-                    print("发生错误")
-                    print(message)
-                    print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-        return username + ": " + output_text[1:], is_mentioned, output_text[1:]
-        
-    except Exception as e:
-        print("---message_to_text---")
-        print(messages)
-        print("---")
-        print(e)
-        print("---")
+    for message in messages:
+        match message["type"]:
+            case "text":
+                message_text = message["data"]["text"]
+                if f"@{SELF_NAME}" in message_text:
+                    is_mentioned = True
+                output_text += f" {message_text}"
+            case "image":
+                image_text = ocr(message["data"]["url"].replace("https", "http"))
+                output_text += f"<图片文字: {image_text}> "
+            case "json":
+                text = json.loads(message["data"]["data"])
+                output_text += f"<卡片: {text['prompt']}> "
+            case "file":
+                output_text += f"<文件名: {message['data']['file']}> "
+            case "video":
+                output_text += "<视频> "
+            case "record":
+                time.sleep(1)
+                pos = message["data"]["path"]
+                silk_to_wav(pos, "./files/file.wav")
+                requests.get("https://localhost:4856/sec_check?arg=file.wav", verify=False)
+                text = stt(f"https://srv.{BASE_URL}:4856/download_fucking_file?filename=file.wav")
+                output_text += f"{text} "
+            case "at":
+                qq_id = message["data"]["qq"]
+                if qq_id == SELF_ID:
+                    is_mentioned = True
+                if qq_id in username_cache:
+                    name = username_cache[qq_id]
+                else:
+                    name = username_cache[qq_id] = get_username(qq_id)
+                output_text += f"@{name}"
+            case "reply":
+                reply_data = get_message(message["data"]["id"])
+                text = messages_to_text(reply_data)[0]
+                output_text += f"<回复: {text}> "
+            case "face":
+                output_text += "<表情> "
+            case "forward":
+                data = message["data"]["content"]
+                text = " "
+                for i in data:
+                    text += messages_to_text(i)[0] + "\n"
+                output_text += f"<合并转发开始>\n{text}\n<合并转发结束> "
+            case "markdown":
+                output_text += f"<markdown: {message['data']['content']}> "
+            case _:
+                output_text += f"<未知> "
+                print("发生错误")
+                print(message)
+                print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+    return username + ": " + output_text.strip(), is_mentioned, output_text[1:]
 
 def ai_reply(messages, model, prompt):
     """
@@ -130,6 +122,15 @@ class Handle_group_message:
             self.model = fetch_db("SELECT model FROM bsettings WHERE owner = %s", (f"g{group_id}",))[0][0]
         else:
             self.init()
+        if ENABLE_PLUGIN:
+            self.plugin = fetch_db("SELECT code FROM plugins WHERE owner = %s", (f"g{group_id}",))
+            if self.plugin:
+                self.plugin = self.plugin[0][0]
+                self.plugin = compile(self.plugin, "<string>", "exec", optimize=2)
+            else:
+                self.plugin = None
+        else:
+            self.plugin = None
         #a: plain_text, b: sender_id
         self.mappings = {
             ".stop": lambda a, b: self.stop(),
@@ -145,6 +146,7 @@ class Handle_group_message:
             ".mdl ": lambda a, b: self.mdl(a),
             ".ping": lambda a, b: self.ping(),
             ".drw ": lambda a, b: self.draw(a),
+            ".adon": lambda a, b: self.addon(),
         }
         for i in DISABLED_FUNCTIONS: # 禁用功能
             if i in self.mappings:
@@ -172,7 +174,7 @@ class Handle_group_message:
     async def process(self, messages):
         sender_id = messages["sender"]["user_id"]
         message_send = []
-        self.original_messages.extend(messages) # 记录原始消息
+        self.original_messages.extend(messages["message"]) # 记录原始消息
         if len(self.original_messages) > 10: # 缓存消息数量限制（原始）
             self.original_messages = self.original_messages[-10:]
         data = messages_to_text(messages)
@@ -190,6 +192,12 @@ class Handle_group_message:
         self.last_time = time.time() # 更新最后聊天时间
         if len(self.stored_messages) > MAX_HISTORY and self.delete: # 超过50条消息清理
             self.stored_messages.pop(0)
+        if self.plugin: # 执行插件
+            try:
+                exec(self.plugin)
+            except Exception as e:
+                message_send.append(f"插件执行失败，已在本次移除\n{e}")
+                self.plugin = None
         # 被提及
         if data[1]:
             self.delete = False
@@ -207,9 +215,28 @@ class Handle_group_message:
     def ping(self):
         return ["Pong!"]
 
-    def stop(self):
-        breakpoint()
-        return ["已停止，待手动检查"]
+    def addon(self):
+        if not ENABLE_PLUGIN:
+            return ["插件未启用"]
+        if self.original_messages[-2]["type"] != "file": #检查文件
+            self.plugin = None
+            db("DELETE FROM plugins WHERE owner = %s", (f"g{self.group_id}",))
+            return ["已移除插件"]
+        if self.original_messages[-2]["data"]["file"][-3:] != ".py": #检查是否为代码文件
+            return ["请发送.py文件"]
+        pos = requests.post("http://127.0.0.1:3001/get_file", json={"file_id": self.original_messages[-2]["data"]["file_id"]}).json()["data"]["file"]
+        try:
+            with open(pos, "r", encoding="utf-8") as f:
+                code = f.read()
+            if fetch_db("SELECT code FROM plugins WHERE owner = %s", (f"g{self.group_id}",)):
+                db("UPDATE plugins SET code = %s WHERE owner = %s", (code, f"g{self.group_id}"))
+            else:
+                db("INSERT INTO plugins (owner, code) VALUES (%s, %s)", (f"g{self.group_id}", code))
+            self.plugin = compile(code, "<string>", "exec", optimize=2)
+            os.remove(pos)
+            return ["插件上传成功"]
+        except UnicodeDecodeError:
+            return ["文件编码错误，请使用UTF-8编码"]
     
     def tar(self, plain_text):
         cards = parse_to_narrative(draw_tarot_cards())

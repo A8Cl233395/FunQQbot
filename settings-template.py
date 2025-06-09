@@ -97,5 +97,5 @@ DEFAULT_DRAWING_MODEL: str = "" # 默认绘图模型
 # 功能开关
 DISABLED_FUNCTIONS = [] # 禁用的功能列表，例：[".drw "]
 MULTITHREAD = False # 是否开启多线程，开启后会导致处理时间较长的消息位置错误
-
 MAX_HISTORY = 50 # 最大历史消息数量，超过此数量的消息将被删除
+ENABLE_PLUGIN = True # 是否开启插件功能，插件权限极高，请只在信任的环境中开启
