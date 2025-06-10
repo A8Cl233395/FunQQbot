@@ -4,19 +4,12 @@
 
 这是一个基于 Python 的 QQ 机器人项目，通过 WebSocket 和 HTTP 与 QQ 客户端（Napcat）进行通信。机器人能够处理多种消息类型，并集成了丰富的功能模块。
 
-## 功能特性
+## 亮点
 
-- **智能对话**：集成大语言模型进行智能回复
-- **塔罗牌占卜**：提供娱乐性塔罗牌占卜功能
-- **每日运势**：结合天气、诗词、一言等数据的综合运势
-- **多媒体处理**：支持图片和音频文件分析处理
-- **载入插件**：支持自定义每个群聊的扩展功能
-- **实用工具**：
-  - 随机数生成
-  - 模型切换
-  - 提示词管理
-  - 视频生成（结合图片和音频）
-- **消息类型支持**：文字、图片、合并转发、回复、@消息等
+- **支持大部分消息类型**：包括文本、图片、语音、文件、合并转发、回复等
+- **插件系统**：支持自定义插件，为每个群添加特殊功能。
+- **数据库支持**：使用 MariaDB 存储配置和数据。
+- **OCR 支持**：使用 Umi-OCR 进行图片文字识别。
 
 ## 环境配置
 
@@ -34,40 +27,57 @@
 2. 在设置中开启HTTP服务，端口设置为1224
 3. 确保服务可被本地访问
 
-如需使用自定义OCR方案，请修改 `bigmodel.py` 中的 `ocr()` 函数实现
+如需使用自定义OCR方案，请修改 `bigmodel.py` 中的 `ocr` 函数实现
 
 ### 数据库配置
-项目使用 MySQL 数据库，默认配置如下：
+项目使用 MariaDB 数据库，CREATE代码如下：
 
 ```sql
 CREATE TABLE `bsettings` (
-  `owner` TEXT NULL DEFAULT NULL COLLATE 'utf8mb4_bin',
-  `model` TEXT NULL DEFAULT NULL COLLATE 'utf8mb4_bin'
-);
-
+	`owner` TEXT NULL DEFAULT NULL COLLATE 'utf8mb4_bin',
+	`model` TEXT NULL DEFAULT NULL COLLATE 'utf8mb4_bin'
+)
+COLLATE='utf8mb4_bin'
+ENGINE=InnoDB
+;
 CREATE TABLE `mdesc` (
-  `name` TEXT NULL DEFAULT NULL COLLATE 'utf8mb4_bin',
-  `des` TEXT NULL DEFAULT NULL COLLATE 'utf8mb4_bin',
-  `vision` TINYINT(1) NULL DEFAULT NULL
-);
-
+	`name` TEXT NULL DEFAULT NULL COLLATE 'utf8mb4_bin',
+	`des` TEXT NULL DEFAULT NULL COLLATE 'utf8mb4_bin',
+	`vision` TINYINT(1) NULL DEFAULT NULL
+)
+COLLATE='utf8mb4_bin'
+ENGINE=InnoDB
+;
+CREATE TABLE `plugins` (
+	`owner` TEXT NULL DEFAULT NULL COLLATE 'utf8mb4_bin',
+	`code` TEXT NULL DEFAULT NULL COLLATE 'utf8mb4_bin',
+	`data` TEXT NULL DEFAULT NULL COLLATE 'utf8mb4_bin'
+)
+COLLATE='utf8mb4_bin'
+ENGINE=InnoDB
+;
 CREATE TABLE `prompts` (
-  `owner` TEXT NULL DEFAULT NULL COLLATE 'utf8mb4_bin',
-  `prompt` TEXT NULL DEFAULT NULL COLLATE 'utf8mb4_bin'
-);
-
+	`owner` TEXT NULL DEFAULT NULL COLLATE 'utf8mb4_bin',
+	`prompt` TEXT NULL DEFAULT NULL COLLATE 'utf8mb4_bin'
+)
+COLLATE='utf8mb4_bin'
+ENGINE=InnoDB
+;
 CREATE TABLE `rsettings` (
-  `owner` TEXT NULL DEFAULT NULL COLLATE 'utf8mb4_bin',
-  `range1` INT(11) NULL DEFAULT NULL,
-  `range2` INT(11) NULL DEFAULT NULL
-);
+	`owner` TEXT NULL DEFAULT NULL COLLATE 'utf8mb4_bin',
+	`range1` INT(11) NULL DEFAULT NULL,
+	`range2` INT(11) NULL DEFAULT NULL
+)
+COLLATE='utf8mb4_bin'
+ENGINE=InnoDB
+;
 ```
 
 默认连接参数：
 - 数据库名：`main`
 - 用户名：`user`
 - 密码：`abc12345`
-- 地址：`localhost`
+- 地址：`127.0.0.1`
 - 编码：`utf8mb4`
 - 校对：`utf8mb4_bin`
 
@@ -84,7 +94,7 @@ CREATE TABLE `rsettings` (
    - 消息格式：array
 
 ### GeckoDriver配置
-下载对应的GeckoDriver并添加到环境变量
+默认自带GeckoDriver，位于 ./asstes/geckodriver.exe
 
 ## 安装与运行
 
@@ -104,23 +114,7 @@ CREATE TABLE `rsettings` (
 
 为了确保机器人所有功能正常运行，需要同时启动 `host_file.py` 和 `main.py` 两个服务。以下是详细说明：
 
-### 1. 多进程启动方式（推荐）
-
-#### Windows 用户 (使用 run.bat)
-```batch
-@echo off
-start python host_file.py
-start python main.py
-```
-
-#### Linux/Mac 用户 (使用 run.sh)
-```bash
-#!/bin/bash
-python3 host_file.py &
-python3 main.py &
-```
-
-### 2. 手动启动方式
+### 1. 手动启动方式
 
 打开两个终端窗口，分别执行：
 
@@ -134,6 +128,8 @@ python host_file.py
 python main.py
 ```
 
+### 2. 自动启动方式
+取消注释 `main.py` 中末尾的 `subprocess.Popen("python host_file.py")`
 
 ## 功能命令
 
@@ -165,8 +161,11 @@ python main.py
 向群聊发送.py结尾，UTF-8编码的文件，内容为插件代码，然后输入 `.adon` 即可。
 示例：
 ```python
-if is_mentioned:
-  message_send.append("你好！")
+# {"init": true, "plugin_data": []}
+print(self.plugin_data)
+print(self.original_messages)
+print(sender_id)
+print(plain_text)
 ```
 
 ## 注意事项

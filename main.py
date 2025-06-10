@@ -2,9 +2,10 @@ import asyncio
 import websockets
 from bigmodel import *
 from services import *
-import shutil
+from shutil import copy
 import random
 import time
+from hashlib import md5
 from concurrent.futures import ThreadPoolExecutor
 from urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
@@ -123,9 +124,10 @@ class Handle_group_message:
         else:
             self.init()
         if ENABLE_PLUGIN:
-            self.plugin = fetch_db("SELECT code FROM plugins WHERE owner = %s", (f"g{group_id}",))
-            if self.plugin:
-                self.plugin = self.plugin[0][0]
+            plugin_test = fetch_db("SELECT code, data FROM plugins WHERE owner = %s", (f"g{group_id}",))
+            if plugin_test:
+                self.plugin = plugin_test[0][0]
+                self.plugin_data = eval(plugin_test[0][1])
                 self.plugin = compile(self.plugin, "<string>", "exec", optimize=2)
             else:
                 self.plugin = None
@@ -170,17 +172,13 @@ class Handle_group_message:
                 self.delete = False
                 self.last_time = time.time()  # 重置最后聊天时间
 
-
     async def process(self, messages):
         sender_id = messages["sender"]["user_id"]
         message_send = []
         self.original_messages.extend(messages["message"]) # 记录原始消息
         if len(self.original_messages) > 10: # 缓存消息数量限制（原始）
             self.original_messages = self.original_messages[-10:]
-        data = messages_to_text(messages)
-        text = data[0]
-        plain_text = data[2]
-        is_mentioned = data[1]
+        text, plain_text, is_mentioned = messages_to_text(messages)
         self.stored_messages.append(text)
         time_to_last = time.time() - self.last_time
         if time_to_last > 3600: # 超过1小时清理
@@ -193,12 +191,17 @@ class Handle_group_message:
         self.last_time = time.time() # 更新最后聊天时间
         if len(self.stored_messages) > MAX_HISTORY and self.delete: # 超过50条消息清理
             self.stored_messages.pop(0)
+        # ! ! ! 插件加载位置 ! ! !
         if self.plugin: # 执行插件
             try:
+                plugin_data_hash = md5(repr(self.plugin_data).encode()).hexdigest()
                 exec(self.plugin)
+                if md5(repr(self.plugin_data).encode()).hexdigest() != plugin_data_hash:
+                    db("UPDATE plugins SET data = %s WHERE owner = %s", (repr(self.plugin_data), f"g{self.group_id}"))
             except Exception as e:
                 message_send.append(f"插件执行失败，已在本次移除\n{e}")
                 self.plugin = None
+        # ! ! ! 插件加载位置 ! ! !
         # 被提及
         if is_mentioned:
             self.delete = False
@@ -216,11 +219,12 @@ class Handle_group_message:
     def ping(self):
         return ["Pong!"]
 
-    def addon(self):
+    def addon(self): # 装载插件
         if not ENABLE_PLUGIN:
             return ["插件未启用"]
         if self.original_messages[-2]["type"] != "file": #检查文件
             self.plugin = None
+            del self.plugin_data
             db("DELETE FROM plugins WHERE owner = %s", (f"g{self.group_id}",))
             return ["已移除插件"]
         if self.original_messages[-2]["data"]["file"][-3:] != ".py": #检查是否为代码文件
@@ -229,15 +233,35 @@ class Handle_group_message:
         try:
             with open(pos, "r", encoding="utf-8") as f:
                 code = f.read()
+            try:
+                init_setting = json.loads(code.split("\n")[0][1:])
+            except:
+                return ["插件格式错误，第一行应为JSON格式的初始化注释"]
+            if "init" not in init_setting:
+                return ["JSON格式错误，缺少init字段"]
+            if init_setting["init"]:
+                if "plugin_data" in init_setting:
+                    self.plugin_data = init_setting["plugin_data"]
+                else:
+                    self.plugin_data = None
             if fetch_db("SELECT code FROM plugins WHERE owner = %s", (f"g{self.group_id}",)):
-                db("UPDATE plugins SET code = %s WHERE owner = %s", (code, f"g{self.group_id}"))
+                if init_setting["init"]:
+                    db("UPDATE plugins SET code = %s, data = %s WHERE owner = %s", (code, repr(self.plugin_data), f"g{self.group_id}"))
+                else:
+                    db("UPDATE plugins SET code = %s WHERE owner = %s", (code, f"g{self.group_id}"))
             else:
-                db("INSERT INTO plugins (owner, code) VALUES (%s, %s)", (f"g{self.group_id}", code))
+                if init_setting["init"]:
+                    db("INSERT INTO plugins (owner, code, data) VALUES (%s, %s, %s)", (f"g{self.group_id}", code, repr(self.plugin_data)))
+                else:
+                    return ["插件格式错误，缺少初始化"]
             self.plugin = compile(code, "<string>", "exec", optimize=2)
-            os.remove(pos)
             return ["插件上传成功"]
         except UnicodeDecodeError:
             return ["文件编码错误，请使用UTF-8编码"]
+        except SyntaxError as e:
+            return [f"代码语法错误: {e}"]
+        finally:
+            os.remove(pos)
     
     def tar(self, plain_text):
         cards = parse_to_narrative(draw_tarot_cards())
@@ -293,7 +317,7 @@ class Handle_group_message:
                     detect = emo_detect(f"https://srv.{BASE_URL}:4856/download_fucking_file?filename=file_vid.jpg")
                     if detect["output"]["check_pass"]:
                         response = requests.post("http://127.0.0.1:3001/get_file", json={"file_id": self.original_messages[-2]["data"]["file_id"]}).json()
-                        shutil.copy(response["data"]["file"], rf"./files/file_vid{self.original_messages[-2]['data']['file'][-4:]}")
+                        copy(response["data"]["file"], rf"./files/file_vid{self.original_messages[-2]['data']['file'][-4:]}")
                         requests.get(f"https://localhost:4856/sec_check?arg=file_vid{self.original_messages[-2]['data']['file'][-4:]}", verify=False)
                         requests.get(f"https://localhost:4856/sec_check?arg=file_vid.jpg", verify=False)
                         requests.get(f"https://localhost:4856/sec_check?arg=file_vid{self.original_messages[-2]['data']['file'][-4:]}", verify=False)
@@ -493,7 +517,7 @@ class Handle_private_message:
                     self.chat_instance.append_message({"type": "text", "text": f"<卡片: {text['prompt']}>"}, to_last=True)
                 case "file":
                     response = requests.post("http://127.0.0.1:3001/get_file", json={"file_id": message["data"]["file_id"]}).json()
-                    shutil.copy(response["data"]["file"], rf"./temp/{response['data']['file_name']}")
+                    copy(response["data"]["file"], rf"./temp/{response['data']['file_name']}")
                     self.chat_instance.append_message({"type": "text", "text": f"<文件: ./{response['data']['file_name']}>"}, to_last=True)
                 case "video":
                     self.chat_instance.append_message({"type": "text", "text": "<视频>"}, to_last=True)
@@ -769,4 +793,5 @@ if __name__ == "__main__":
     for i in result:
         model_list_cache[i[0]] = {"des": i[1], "vision": i[2]}
     print("启动中...")
+    # subprocess.Popen("python host_file.py")
     start_server()

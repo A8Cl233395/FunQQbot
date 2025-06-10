@@ -219,10 +219,7 @@ def fetch_db(prompt, data=None):
         collation='utf8mb4_bin'  # 使用兼容的校对规则
     )
     cursor = conn.cursor()
-    if data:
-        cursor.execute(prompt, data)
-    else:
-        cursor.execute(prompt)
+    cursor.execute(prompt, data or ())
     result = cursor.fetchall()
     conn.commit()
     cursor.close()
@@ -239,10 +236,7 @@ def db(prompt, data=None):
         collation='utf8mb4_bin'  # 使用兼容的校对规则
     )
     cursor = conn.cursor()
-    if data:
-        cursor.execute(prompt, data)
-    else:
-        cursor.execute(prompt)
+    cursor.execute(prompt, data or ())
     conn.commit()
     cursor.close()
     conn.close()
