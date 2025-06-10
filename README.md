@@ -94,7 +94,7 @@ ENGINE=InnoDB
    - 消息格式：array
 
 ### GeckoDriver配置
-默认自带GeckoDriver，位于 ./asstes/geckodriver.exe
+默认自带GeckoDriver，位于 ./assets/geckodriver.exe
 
 ## 安装与运行
 
