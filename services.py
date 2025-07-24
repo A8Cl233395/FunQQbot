@@ -240,3 +240,45 @@ def db(prompt, data=None):
     conn.commit()
     cursor.close()
     conn.close()
+
+def get_netease_music_details_text(song_id, comment_limit=5):
+    lyric_api = f"https://music.163.com/api/song/lyric?os=pc&id={song_id}&lv=-1&tv=-1"
+    comment_api = f"https://music.163.com/api/v1/resource/comments/R_SO_4_{song_id}?offset=0&limit=3"
+    details_api = f"https://music.163.com/api/song/detail/?ids=[{song_id}]"
+    combined = ""
+
+    lyric_json = requests.get(lyric_api).json()
+    translations = {}
+    time_tag_regex = r'\[(?:\d{2,}:)?\d{2}[:.]\d{2,}(?:\.\d+)?\]'
+    if "tlyric" in lyric_json and lyric_json["tlyric"]["version"] and lyric_json["tlyric"]["lyric"]:
+        for line in lyric_json["tlyric"]["lyric"].split("\n"):
+            time_tag = re.match(time_tag_regex, line)
+            if time_tag:
+                cleaned_line = re.sub(time_tag_regex, '', line).strip()
+                translations[time_tag.group()] = cleaned_line
+    combined_lyrics = []
+    for line in lyric_json["lrc"]["lyric"].split("\n"):
+        time_tag = re.match(time_tag_regex, line)
+        if time_tag:
+            cleaned_line = re.sub(time_tag_regex, '', line).strip()
+            combined_lyrics.append(cleaned_line)
+            if time_tag.group() in translations:
+                combined_lyrics.append(translations[time_tag.group()])
+    combined_lyrics_text = "\n".join(combined_lyrics).strip()
+
+    detail_json = requests.get(details_api).json()
+    song_detail_json = detail_json["songs"][0]
+    name = song_detail_json["name"]
+    artists = [artist["name"] for artist in song_detail_json["artists"]]
+    transname = song_detail_json["transName"] if "transName" in song_detail_json else None
+
+    comment_json = requests.get(comment_api).json()
+    hot_comments = comment_json["hotComments"]
+    comments = [comment["content"] for comment in hot_comments][:comment_limit]
+    comments_text = "\n\n".join(comments).strip()
+    combined += f"曲名: {name}\n"
+    combined += f"翻译名: {transname}\n" if transname else ""
+    combined += f"歌手: {', '.join(artists)}\n"
+    combined += f"歌词:\n---\n{combined_lyrics_text}\n---\n"
+    combined += f"热评:\n---\n{comments_text}\n---"
+    return combined

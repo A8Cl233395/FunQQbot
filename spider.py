@@ -69,7 +69,7 @@ class WebSpider:
                 })
         return self.results
 
-    def start_crawling(self):
+    def start_crawling(self, limit=5):
         """开始爬取，并将结果保存到 JSON 文件"""
         self.results = []
         for keyword in self.keywords:
@@ -97,7 +97,7 @@ class WebSpider:
             if self.retry_count < 1:
                 self.retry_count += 1
                 self.start_crawling()
-        self.results = self.results[:5]
+        self.results = self.results[:limit]
         return self.results
 
     def formatted(self):

@@ -47,18 +47,27 @@ def wf_file():
 
 @app.route('/upload_file', methods=['POST'])
 def upload_file():
-    if request.method == 'POST':
-        file = request.files.get('file')
-        if file:
-            fileformat = file.filename.split('.')[-1]
-            file.save(f'{WORKING_DIR}/files/tempfile.{fileformat}')
-            allowed.append(f'tempfile.{fileformat}')
-            return "ok"
-    return "error"
+    if request.method != 'POST':
+        return "error"
+    # 是否来自局域网
+    if not is_local_ip(request.remote_addr):
+        return "why?"
+    file = request.files.get('file')
+    if file:
+        file.save(f'{WORKING_DIR}/files/tempfile')
+        allowed.append("tempfile")
+        return "ok"
 
 @app.route('/ping')
 def ping():
     return "pong"
+
+def is_local_ip(ip):
+    parts = list(map(int, ip.split('.')))
+    # 检查私有IP范围
+    return (parts[0] == 10) or \
+           (parts[0] == 172 and 16 <= parts[1] <= 31) or \
+           (parts[0] == 192 and parts[1] == 168)
 
 if __name__ == '__main__':
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

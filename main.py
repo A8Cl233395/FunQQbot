@@ -6,7 +6,6 @@ from shutil import copy
 import random
 import time
 from hashlib import md5
-from concurrent.futures import ThreadPoolExecutor
 from urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 from settings import *
@@ -74,7 +73,7 @@ def messages_to_text(data):
                 print("发生错误")
                 print(message)
                 print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-    return username + ": " + output_text.strip(), is_mentioned, output_text[1:]
+    return username + ": " + output_text.strip(),output_text[1:], is_mentioned
 
 def ai_reply(messages, model, prompt):
     """
@@ -133,22 +132,21 @@ class Handle_group_message:
                 self.plugin = None
         else:
             self.plugin = None
-        #a: plain_text, b: sender_id
+        #a: command_content, b: sender_id
         self.mappings = {
-            ".stop": lambda a, b: self.stop(),
             ".tar ": lambda a, b: self.tar(a),
             ".luck": lambda a, b: self.luck(b),
             ".help": lambda a, b: self.help(),
-            ".rst": lambda a, b: self.rst(),
-            ".vid": lambda a, b: self.vid(),
-            ".pmt": lambda a, b: self.pmt_reset(),
-            ".pmt ": lambda a, b: self.pmt_set(a),
-            ".rdm": lambda a, b: self.rdm_use(),
-            ".rdm ": lambda a, b: self.rdm_set(a),
-            ".mdl ": lambda a, b: self.mdl(a),
+            ".clear": lambda a, b: self.clear(),
+            ".tovideo": lambda a, b: self.video(),
+            ".prompt": lambda a, b: self.prompt_reset(a),
+            ".prompt ": lambda a, b: self.prompt_set(a),
+            ".random": lambda a, b: self.random_use(),
+            ".random ": lambda a, b: self.random_set(a),
+            ".model ": lambda a, b: self.set_model(a),
             ".ping": lambda a, b: self.ping(),
-            ".drw ": lambda a, b: self.draw(a),
-            ".adon": lambda a, b: self.addon(),
+            ".draw ": lambda a, b: self.draw(a),
+            ".addon": lambda a, b: self.addon(),
         }
         for i in DISABLED_FUNCTIONS: # 禁用功能
             if i in self.mappings:
@@ -207,10 +205,17 @@ class Handle_group_message:
             self.delete = False
             result = ai_reply(self.stored_messages, self.model, self.prompt)
             message_send.extend(result)
-        if plain_text[:1] == ".": # 指令
-            if plain_text[:5] in self.mappings:
-                result = self.mappings[plain_text[:5]](plain_text, sender_id)
-                message_send.extend(result)
+        # 指令
+        if plain_text[:1] == ".":
+            plain_text_slices = plain_text.split()
+            if len(plain_text_slices) == 1:
+                command_type = plain_text_slices[0]
+            else:
+                command_type = plain_text_slices[0] + " "
+            if command_type in self.mappings: # 检查指令是否存在
+                command_content = plain_text[len(command_type):]
+                command_result = plain_text[command_type](command_content, sender_id)
+                message_send.extend(command_result)
         for i in message_send:
             self.stored_messages.append(f"{SELF_NAME}: {i}")
             await send_group_message(self.group_id, i)
@@ -259,14 +264,13 @@ class Handle_group_message:
         except UnicodeDecodeError:
             return ["文件编码错误，请使用UTF-8编码"]
         except SyntaxError as e:
-            return [f"代码语法错误: {e}"]
+            return [f"语法错误: {e}"]
         finally:
             os.remove(pos)
     
-    def tar(self, plain_text):
+    def tar(self, command_content):
         cards = parse_to_narrative(draw_tarot_cards())
-        user_input = plain_text[5:]
-        result = ask_ai(f"你是塔罗牌占卜师，这是你抽出的塔罗牌: \n{cards}", user_input, model=self.model)
+        result = ask_ai(f"你是塔罗牌占卜师，这是你抽出的塔罗牌: \n{cards}", command_content, model=self.model)
         return [cards + "\n---\n" + result]
 
     def luck(self, sender_id):
@@ -290,7 +294,7 @@ class Handle_group_message:
     def help(self):
         return [f"https://www.{BASE_URL}/?p=77", "请复制到浏览器打开，时间可能较长"]
 
-    def rst(self):
+    def clear(self):
         self.stored_messages = []
         return ["已清除聊天记录缓存"]
 
@@ -300,12 +304,11 @@ class Handle_group_message:
         self.model = DEFAULT_MODEL
         self.prompt = DEFAULT_PROMPT
 
-    def draw(self, plain_text):
-        prompt = plain_text.replace(".drw ", "")
-        url = draw(prompt)
+    def draw(self, command_content):
+        url = draw(command_content)
         return [f"[CQ:image,file={url}]"]
     
-    def vid(self):
+    def video(self):
         if self.original_messages[-3]["type"] == "image": #检查图片
             if self.original_messages[-2]["type"] == "file": #检查文件
                 if self.original_messages[-2]["data"]["file"][-4:] in [".wav", ".mp3"]: #检查是否为音频文件
@@ -335,18 +338,17 @@ class Handle_group_message:
         else:
             return ["请发送图片和音频文件"]
 
-    def pmt_reset(self):
+    def prompt_reset(self):
         db("UPDATE prompts SET prompt = %s WHERE owner = %s", (DEFAULT_PROMPT, f"g{self.group_id}"))
         self.prompt = DEFAULT_PROMPT
         return ["设置成功，默认提示为：" + DEFAULT_PROMPT]
 
-    def pmt_set(self, plain_text):
-        user_input = plain_text.replace(".pmt ", "")
-        self.prompt = user_input
-        db("UPDATE prompts SET prompt = %s WHERE owner = %s", (user_input, f"g{self.group_id}"))
+    def prompt_set(self, command_content):
+        self.prompt = command_content
+        db("UPDATE prompts SET prompt = %s WHERE owner = %s", (command_content, f"g{self.group_id}"))
         return ["设置成功"]
 
-    def rdm_use(self):
+    def random_use(self):
         result = fetch_db("SELECT range1, range2 FROM rsettings WHERE owner = %s", (f"g{self.group_id}",))
         if result:
             range1 = result[0][0]
@@ -357,27 +359,29 @@ class Handle_group_message:
             db("INSERT INTO rsettings (owner, range1, range2) VALUES (%s, %s, %s)", (f"g{self.group_id}", 0, 1))
         return [f"{range1} - {range2}之间的随机数: {random.randint(range1, range2)}"]
 
-    def rdm_set(self, plain_text):
-        text_split = plain_text.split()
-        if len(text_split) == 3:
-            db("UPDATE rsettings SET range1 = %s, range2 = %s WHERE owner = %s", (text_split[1], text_split[2], f"g{self.group_id}"))
+    def random_set(self, command_content):
+        text_split = command_content.split()
+        if len(text_split) == 2:
+            db("UPDATE rsettings SET range1 = %s, range2 = %s WHERE owner = %s", (text_split[0], text_split[1], f"g{self.group_id}"))
             return ["设置成功"]
         else:
             return ["设置失败"]
     
-    def mdl(self, plain_text):
-        user_input = plain_text.replace(".mdl ", "")
-        if user_input in ["ls", "list", "help"]:
+    def set_model(self, command_content):
+        global model_list_cache
+        result = fetch_db("SELECT * FROM mdesc")
+        for i in result:
+            model_list_cache[i[0]] = {"des": i[1], "vision": i[2]}
+        if command_content in ["ls", "list", "help"]:
             temp = "模型列表: "
             for i in model_list_cache:
                 temp += f'''\n    {i}: {model_list_cache[i]["des"]}'''
             return [temp]
         else:
-            result = fetch_db("SELECT * FROM mdesc WHERE name = %s", (user_input,))
-            if result:
-                db("UPDATE bsettings SET model = %s WHERE owner = %s", (user_input, f"g{self.group_id}"))
-                self.model = user_input
-                return ["设置成功，你选择的模型为" + user_input]
+            if command_content in model_list_cache:
+                db("UPDATE bsettings SET model = %s WHERE owner = %s", (command_content, f"g{self.group_id}"))
+                self.model = command_content
+                return ["设置成功，你选择的模型为" + command_content]
             else:
                 return ["模型不存在"]
 
@@ -389,57 +393,72 @@ class Handle_private_message:
         if self.model:
             self.model = self.model[0][0]
             self.prompt = fetch_db("SELECT prompt FROM prompts WHERE owner = %s", (f"p{user_id}",))[0][0]
+        else:
+            self.init()
         self.chatting = False
         # a: text
         self.mappings = {
             ".stop": lambda a: self.stop(),
-            ".pmt ": lambda a: self.pmt_set(a),
-            ".pmt": lambda a: self.pmt_reset(),
-            ".bil ": lambda a: self.bil(a),
-            ".rdm": lambda a: self.rdm_use(),
-            ".rdm ": lambda a: self.rdm_set(a),
-            ".mdl ": lambda a: self.mdl(a),
+            ".prompt ": lambda a: self.prompt_set(a),
+            ".prompt": lambda a: self.prompt_reset(),
+            ".bili ": lambda a: self.bilibili(a),
+            ".random": lambda a: self.random_use(),
+            ".random ": lambda a: self.random_set(a),
+            ".model ": lambda a: self.set_model(a),
             ".ping": lambda a: self.ping(),
             ".chat": lambda a: self.toggle_chat(),
-            ".drw ": lambda a: self.draw(a),
+            ".draw ": lambda a: self.draw(a),
+            ".chat ": lambda a: self.set_chat(a),
         }
         for i in DISABLED_FUNCTIONS: # 禁用功能
             if i in self.mappings:
                 self.mappings.pop(i)
     
+    def init(self):
+        db("INSERT INTO bsettings (owner, model) VALUES (%s, %s)", (f"p{self.user_id}", DEFAULT_MODEL))
+        db("INSERT INTO prompts (owner, prompt) VALUES (%s, %s)", (f"p{self.user_id}", DEFAULT_PROMPT))
+        db("INSERT INTO csettings (owner, tools) VALUES (%s, %s)", (f"p{self.user_id}", True))
+        self.model = DEFAULT_MODEL
+        self.prompt = DEFAULT_PROMPT
+    
     async def process(self, messages):
         text = process_first_message_text(messages)
         command_handled = False
         if text[:1] == '.':
-            if text[:5] in self.mappings:
-                result = self.mappings[text[:5]](text)
+            plain_text_slices = text.split()
+            if len(plain_text_slices) == 1:
+                command_type = plain_text_slices[0]
+            else:
+                command_type = plain_text_slices[0] + " "
+            if command_type in self.mappings:  # 检查指令是否存在
+                command_content = text[len(command_type):]
+                result = self.mappings[command_type](command_content)
                 for i in result:
                     await send_private_message(self.user_id, i)
                     await asyncio.sleep(0.1)
                 command_handled = True
         # 处理聊天模式
         if self.chatting and not command_handled:
-            await self.chat(messages)
+            await self.chat(messages["message"])
     
     def stop(self):
         breakpoint()
         return ["已停止，待手动检查"]
     
-    def pmt_reset(self):
+    def prompt_reset(self):
         db("UPDATE prompts SET prompt = %s WHERE owner = %s", (DEFAULT_PROMPT, f"p{self.user_id}"))
         self.prompt = DEFAULT_PROMPT
         return ["设置成功，默认提示为：" + DEFAULT_PROMPT]
     
-    def pmt_set(self, plain_text):
-        user_input = plain_text.replace(".pmt ", "")
-        self.prompt = user_input
-        db("UPDATE prompts SET prompt = %s WHERE owner = %s", (user_input, f"p{self.user_id}"))
+    def prompt_set(self, command_content):
+        self.prompt = command_content
+        db("UPDATE prompts SET prompt = %s WHERE owner = %s", (command_content, f"p{self.user_id}"))
         return ["设置成功"]
     
-    def bil(self, plain_text):
-        return [formated_bili_summary(plain_text.replace(".bil ", ""))]
+    def bilibili(self, command_content):
+        return [formated_bili_summary(command_content)]
     
-    def rdm_use(self):
+    def random_use(self):
         result = fetch_db("SELECT range1, range2 FROM rsettings WHERE owner = %s", (f"p{self.user_id}",))
         if result:
             range1 = result[0][0]
@@ -450,27 +469,29 @@ class Handle_private_message:
             db("INSERT INTO rsettings (owner, range1, range2) VALUES (%s, %s, %s)", (f"p{self.user_id}", 0, 1))
         return [f"{range1} - {range2}之间的随机数: {random.randint(range1, range2)}"]
     
-    def rdm_set(self, plain_text):
-        text_split = plain_text.split()
-        if len(text_split) == 3:
-            db("UPDATE rsettings SET range1 = %s, range2 = %s WHERE owner = %s", (text_split[1], text_split[2], f"p{self.user_id}"))
+    def random_set(self, command_content):
+        text_split = command_content.split()
+        if len(text_split) == 2:
+            db("UPDATE rsettings SET range1 = %s, range2 = %s WHERE owner = %s", (text_split[0], text_split[1], f"p{self.user_id}"))
             return ["设置成功"]
         else:
             return ["设置失败"]
     
-    def mdl(self, plain_text):
-        user_input = plain_text.replace(".mdl ", "")
-        if user_input in ["ls", "list", "help"]:
+    def set_model(self, command_content):
+        global model_list_cache
+        result = fetch_db("SELECT * FROM mdesc")
+        for i in result:
+            model_list_cache[i[0]] = {"des": i[1], "vision": i[2]}
+        if command_content in ["ls", "list", "help"]:
             temp = "模型列表: "
             for i in model_list_cache:
                 temp += f'''\n    {i}: {model_list_cache[i]["des"]}'''
             return [temp]
         else:
-            result = fetch_db("SELECT * FROM mdesc WHERE name = %s", (user_input,))
-            if result:
-                db("UPDATE bsettings SET model = %s WHERE owner = %s", (user_input, f"p{self.user_id}"))
-                self.model = user_input
-                return ["设置成功，你选择的模型为" + user_input]
+            if command_content in model_list_cache:
+                db("UPDATE bsettings SET model = %s WHERE owner = %s", (command_content, f"p{self.user_id}"))
+                self.model = command_content
+                return ["设置成功，你选择的模型为" + command_content]
             else:
                 return ["模型不存在"]
     
@@ -481,76 +502,83 @@ class Handle_private_message:
         if self.chatting:
             self.chatting = False
             del self.chat_instance
-            return ["代码模式已关闭"]
+            return ["聊天模式已关闭"]
         else:
-            result = fetch_db("SELECT prompt FROM prompts WHERE owner = %s", (f"p{self.user_id}",))
-            if result:
-                chat_prompt = result[0][0]
-            else:
-                chat_prompt = DEFAULT_PROMPT
-                db("INSERT INTO prompts (owner, prompt) VALUES (%s, %s)", (f"p{self.user_id}", DEFAULT_PROMPT))
             self.chatting = True
-            self.chat_instance = CodeExecutor(model=self.model, messages=[{"role": "system", "content": chat_prompt}])
-            return ["代码模式已开启"]
+            is_tools_allowed = fetch_db("SELECT tools FROM csettings WHERE owner = %s", (f"p{self.user_id}",))[0][0]
+            self.chat_instance = CodeExecutor(model=self.model, messages=[{"role": "system", "content": self.prompt}], allow_tools=is_tools_allowed)
+            return ["聊天模式已开启"]
     
-    def draw(self, plain_text):
-        prompt = plain_text.replace(".drw ", "")
-        url = draw(prompt)
+    def draw(self, command_content):
+        url = draw(command_content)
         return [f"[CQ:image,file={url}]"]
+
+    def set_chat(self, command_content):
+        settings = command_content.split()
+        if len(settings) != 2:
+            return ["格式错误"]
+        match settings[0]:
+            case "tools":
+                if settings[1].lower() in ["on", "true", "1"]:
+                    db("UPDATE csettings SET tools = %s WHERE owner = %s", (True, f"p{self.user_id}"))
+                    return ["已开启工具"]
+                elif settings[1].lower() in ["off", "false", "0"]:
+                    db("UPDATE csettings SET tools = %s WHERE owner = %s", (False, f"p{self.user_id}"))
+                    return ["已关闭工具"]
+                else:
+                    return ["参数错误"]
+            case _:
+                return ["未知设置项"]
+
     
     async def chat(self, messages):
-        self.chat_instance.append_message({"role": "user", "content": []})
+        self.chat_instance.new()
         contains_text = False
         for message in messages:
             match message["type"]:
                 case "text":
                     contains_text = True
-                    self.chat_instance.append_message({"type": "text", "text": message["data"]["text"]}, to_last=True)
+                    self.chat_instance.add({"type": "text", "text": message["data"]["text"]})
                 case "image":
                     if model_list_cache[self.model]["vision"] == 1:
-                        self.chat_instance.append_message({"type": "image_url","image_url": {"url": message["data"]["url"].replace("https", "http")}}, to_last=True)
+                        self.chat_instance.add({"type": "image_url","image_url": {"url": message["data"]["url"].replace("https", "http")}})
                     else:
                         image_text = ocr(message["data"]["url"].replace("https", "http"))
-                        self.chat_instance.append_message({"type": "text", "text": f"<图片文字: {image_text}>"}, to_last=True)
+                        self.chat_instance.add({"type": "text", "text": f"<图片文字: {image_text}>"})
                 case "json":
                     text = json.loads(message["data"]["data"])
-                    self.chat_instance.append_message({"type": "text", "text": f"<卡片: {text['prompt']}>"}, to_last=True)
+                    match text["app"]:
+                        case "com.tencent.music.lua":
+                            music_id = re.search(r'id=(\d+)', text["meta"]["music"]["musicUrl"]).group(1)
+                            self.chat_instance.add({"type": "text", "text": f"<音乐: {get_netease_music_details_text(music_id)}>"})
+                        case _:
+                            self.chat_instance.add({"type": "text", "text": f"<卡片: {text['prompt']}>"})
                 case "file":
                     response = requests.post("http://127.0.0.1:3001/get_file", json={"file_id": message["data"]["file_id"]}).json()
                     copy(response["data"]["file"], rf"./temp/{response['data']['file_name']}")
-                    self.chat_instance.append_message({"type": "text", "text": f"<文件: ./{response['data']['file_name']}>"}, to_last=True)
+                    self.chat_instance.add({"type": "text", "text": f"<文件: ./{response['data']['file_name']}>"})
                 case "video":
-                    self.chat_instance.append_message({"type": "text", "text": "<视频>"}, to_last=True)
+                    self.chat_instance.add({"type": "text", "text": "<视频>"})
                 case "record":
                     asyncio.sleep(1)
                     pos = message["data"]["path"]
                     silk_to_wav(pos, "./files/file.wav")
                     requests.get("https://localhost:4856/sec_check?arg=file.wav", verify=False)
                     text = stt(f"https://srv.{BASE_URL}:4856/download_fucking_file?filename=file.wav")
-                    self.chat_instance.append_message({"type": "text", "text": text}, to_last=True)
+                    self.chat_instance.add({"type": "text", "text": text})
                 case "reply":
                     reply_data = get_message(message["data"]["id"])
                     text = messages_to_text(reply_data)[0]
-                    self.chat_instance.append_message({"type": "text", "text": f"<回复: {text}>"}, to_last=True)
+                    self.chat_instance.add({"type": "text", "text": f"<回复: {text}>"})
                 case "face":
-                    self.chat_instance.append_message({"type": "text", "text": "<表情>"}, to_last=True)
+                    self.chat_instance.add({"type": "text", "text": "<表情>"})
                 case _:
-                    self.chat_instance.append_message({"type": "text", "text": "<未知>"}, to_last=True)
+                    self.chat_instance.add({"type": "text", "text": "<未知>"})
         if contains_text:
-            result = self.chat_instance.process()
-            for i in result["return"]:
-                await send_private_message(self.user_id, i)
-                await asyncio.sleep(0.1)
-            while True:
-                if result["status"] in [2, 3]:
-                    result = self.chat_instance.process()
-                    for i in result["return"]:
-                        await send_private_message(self.user_id, i)
-                        await asyncio.sleep(0.1)
-                elif result["status"] in [0, 1]:
-                    break
+            for response in self.chat_instance.process():
+                send_private_message_http(self.user_id, response)
 
-async def send_private_message(user_id, message):
+async def send_private_message(user_id, message, method="websocket"):
     # 别删!!!
     if f"{message}" == "":
         pass
@@ -563,6 +591,12 @@ async def send_private_message(user_id, message):
             },
         })
         await global_websocket.send(response_json)
+
+def send_private_message_http(user_id, message):
+    if f"{message}" == "":
+        pass
+    else:
+        requests.post("http://127.0.0.1:3001/send_private_msg", json={"user_id": user_id, "message": f"{message}"})
 
 def get_weather(adcode = "310110"):
     result = requests.get(f"https://restapi.amap.com/v3/weather/weatherInfo?key={AMAP_KEY}&city={adcode}&extensions=base").json()
@@ -583,9 +617,7 @@ def get_emo_result_loop(task_id):
         result = requests.get(url, headers=headers).json()
         if result["output"]["task_status"] == "SUCCEEDED":
             return {"status": 1, "result": result["output"]["results"]["video_url"]}
-        elif result["output"]["task_status"] == "RUNNING":
-            time.sleep(1)
-        elif result["output"]["task_status"] == "PENDING":
+        elif result["output"]["task_status"] in ["RUNNING", "PENDING"]:
             time.sleep(1)
         else:
             return {"status": 0, "result": result["output"]["message"]}
@@ -724,6 +756,7 @@ async def send_group_message(group_id, message):
         await global_websocket.send(data)
 
 if MULTITHREAD:
+    from concurrent.futures import ThreadPoolExecutor
     executor = ThreadPoolExecutor(max_workers=20)
 
 async def handler_multithread(websocket):
@@ -731,6 +764,8 @@ async def handler_multithread(websocket):
     global_websocket = websocket
     async for message in websocket:
         data = json.loads(message)
+        if DEBUG:
+            print(data)
         if "message_type" in data:
             if data["message_type"] == "group":
                 executor.submit(group_message_handler, data["message"], data["group_id"], data["sender"]["nickname"], data["user_id"])
@@ -742,6 +777,8 @@ async def handler(websocket):
     global_websocket = websocket
     async for message in websocket:
         data = json.loads(message)
+        if DEBUG:
+            print(data)
         if "message_type" in data:
             if data["message_type"] == "group":
                 if data["group_id"] not in groups:
@@ -772,6 +809,14 @@ def private_message_handler(messages, user_id):
     finally:
         loop.close()
 
+def console():
+    while True:
+        text = input()
+        try:
+            exec(text)
+        except Exception as e:
+            print(e)
+
 def start_server():
     event_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(event_loop)
@@ -780,6 +825,8 @@ def start_server():
     else:
         start_wss_server_task = websockets.serve(handler, "0.0.0.0", 8080)
     event_loop.run_until_complete(start_wss_server_task)
+    if DEBUG:
+        event_loop.run_in_executor(None, console)
     try:
         event_loop.run_forever()
     finally:
