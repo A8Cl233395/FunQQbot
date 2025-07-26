@@ -1,14 +1,8 @@
-import requests
 import re
-import json
 import socket
 import random
-from bigmodel import stt
-import subprocess
+from bigmodel import *
 import mysql.connector
-from urllib3.exceptions import InsecureRequestWarning
-from settings import *
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 def get_bili_text(user_input):
     try:
@@ -180,35 +174,6 @@ def get_saucenao_html(url):
     except:
         return [{"creator": None, "similarity": None, "source": None, "id": None, "url": None}]
 
-def get_saucenao_api(url):
-        keys = ["7e14e4a41cf8e40ac5f64d8b8924bc5ffc667d2d", "cf90e4fb7890d0b4ff2b5d84d0494409d5bae964"]
-        key = random.choice(keys)
-        data = {"api_key":key, "output_type":2, "url":url, "hide":3}
-        response_data = requests.post("https://saucenao.com/search.php", data=data)
-        response = response_data.json()
-        results = []
-        for data in response["results"]:
-            result = {"similarity": None, "db": None, "url": None, "id": None, "creator": None}
-            similarity = data["header"]["similarity"]
-            if float(similarity) >= 70:
-                result["similarity"] = float(similarity)
-                pat = ''': (.*?) - '''
-                source = data["header"]["index_name"]
-                result["db"] = re.findall(pat, source, re.DOTALL)[0]
-                filtered_dict = {k: v for k, v in data["data"].items() if 'id' in k}
-                result["id"] = []
-                for key, value in filtered_dict.items():
-                    result["id"].append(key)
-                    result["id"].append(value)
-                if "source" in data["data"]:
-                    result["url"] = data["data"]["source"]
-                elif "ext_urls" in data["data"]:
-                    result["url"] = data["data"]["ext_urls"][0]
-                if "creator" in data["data"]:
-                    result["creator"] = data["data"]["creator"]
-                results.append(result)
-        return results
-
 def fetch_db(prompt, data=None):
     conn = mysql.connector.connect(
         host='127.0.0.1',
@@ -282,3 +247,14 @@ def get_netease_music_details_text(song_id, comment_limit=5):
     combined += f"歌词:\n---\n{combined_lyrics_text}\n---\n"
     combined += f"热评:\n---\n{comments_text}\n---"
     return combined
+
+def get_weather(adcode = "310110"):
+    result = requests.get(f"https://restapi.amap.com/v3/weather/weatherInfo?key={AMAP_KEY}&city={adcode}&extensions=base").json()
+    return {"time": time.time(), "weather": result["lives"][0]["weather"], "temperature": result["lives"][0]["temperature"], "humidity": result["lives"][0]["humidity"], "windpower": result["lives"][0]["windpower"]}
+
+def get_poem():
+    result = requests.get("https://v1.jinrishici.com/all.json").json()
+    return f"{result['content']} - {result['origin']}"
+
+def get_tip():
+    return requests.get("https://v1.hitokoto.cn").json()['hitokoto']

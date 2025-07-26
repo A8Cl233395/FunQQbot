@@ -1,10 +1,7 @@
 import asyncio
 import websockets
-from bigmodel import *
 from services import *
 from shutil import copy
-import random
-import time
 from hashlib import md5
 from urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
@@ -597,30 +594,6 @@ def send_private_message_http(user_id, message):
         pass
     else:
         requests.post("http://127.0.0.1:3001/send_private_msg", json={"user_id": user_id, "message": f"{message}"})
-
-def get_weather(adcode = "310110"):
-    result = requests.get(f"https://restapi.amap.com/v3/weather/weatherInfo?key={AMAP_KEY}&city={adcode}&extensions=base").json()
-    return {"time": time.time(), "weather": result["lives"][0]["weather"], "temperature": result["lives"][0]["temperature"], "humidity": result["lives"][0]["humidity"], "windpower": result["lives"][0]["windpower"]}
-
-def get_poem():
-    result = requests.get("https://v1.jinrishici.com/all.json").json()
-    return f"{result['content']} - {result['origin']}"
-
-def get_tip():
-    return requests.get("https://v1.hitokoto.cn").json()['hitokoto']
-
-def get_emo_result_loop(task_id):
-    '''emo模型结果获取'''
-    while True:
-        url = f"https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}"
-        headers = {"Authorization": ALIYUN_KEY}
-        result = requests.get(url, headers=headers).json()
-        if result["output"]["task_status"] == "SUCCEEDED":
-            return {"status": 1, "result": result["output"]["results"]["video_url"]}
-        elif result["output"]["task_status"] in ["RUNNING", "PENDING"]:
-            time.sleep(1)
-        else:
-            return {"status": 0, "result": result["output"]["message"]}
 
 def get_username(id, times = 0):
     try:

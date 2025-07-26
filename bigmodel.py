@@ -17,10 +17,10 @@ def ask_ai(prompt, content, model=DEFAULT_MODEL, temperature=TEMPERATURE):
     url = PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"]
     api_key = PREFIX_TO_ENDPOINT[model.split("-")[0]]["key"]
     oclient = OpenAI(api_key=api_key, base_url=url)
-    if prompt == "":
-        messages = [{"role": "user", "content": content}]
-    else:
+    if prompt:
         messages = [{"role": "system", "content": prompt}, {"role": "user", "content": content}]
+    else:
+        messages = [{"role": "user", "content": content}]
     response = oclient.chat.completions.create(
         model=model,
         messages=messages,
@@ -28,13 +28,6 @@ def ask_ai(prompt, content, model=DEFAULT_MODEL, temperature=TEMPERATURE):
         temperature=temperature,
     )
     return response.choices[0].message.content
-
-def verify_json(json_str):
-    try:
-        json.loads(json_str)
-        return True
-    except json.JSONDecodeError:
-        return False
 
 def ai(messages,model=DEFAULT_MODEL, temperature=TEMPERATURE):
     url = PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"]
@@ -90,7 +83,7 @@ class CodeExecutor:
                 "type": "function",
                 "function": {
                     "name": "web_search",
-                    "description": "使用搜索引擎搜索网络",
+                    "description": "使用搜索引擎搜索网络，搜索后需要使用visit访问",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -107,7 +100,7 @@ class CodeExecutor:
                 "type": "function",
                 "function": {
                     "name": "visit",
-                    "description": "查看搜索结果或访问链接",
+                    "description": "访问搜索结果或链接",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -120,16 +113,33 @@ class CodeExecutor:
                     },
                 },
             },
+            {
+                "type": "function",
+                "function": {
+                    "name": "draw",
+                    "description": "调用大模型画图",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "prompt": {
+                                "description": "提示词",
+                                "type": "string",
+                            },
+                        },
+                        "required": ["prompt"]
+                    },
+                },
+            },
         ]
         self.tools = self.tools if allow_tools else []
-        self.safe_tools = ["send_file", "web_search", "visit"]
+        self.safe_tools = ["send_file", "web_search", "visit", "draw"]
         self.status = 0
         self.model = model
         self.messages = messages
         self.cwd = r".\temp"
         self.status = 0 # 0: 无需确认 1: 需要确认
         self.tool_responses = []
-        self.tool_mappings = {"run_python": "code", "send_file": "filename", "web_search": "keyword", "visit": "content"}
+        self.tool_mappings = {"run_python": "code", "send_file": "filename", "web_search": "keyword", "visit": "content", "draw": "prompt"}
 
     def ai(self):
         params = {
@@ -184,6 +194,7 @@ class CodeExecutor:
                         if not is_using_tool:
                             if buffer:
                                 yield buffer.strip()
+                                buffer = ""
                             is_using_tool = True
                         for tool_call in delta.tool_calls:
                             if tool_call.id:
@@ -200,31 +211,37 @@ class CodeExecutor:
                                 self.tool_calls[tool_call.index]["function"]["arguments"] += tool_call.function.arguments
                 if buffer:
                     yield buffer.strip()
+                    buffer = ""
                 self.messages.append({"role": "assistant", "content": full_content})
                 if self.tool_calls:
                     self.messages[-1]["tool_calls"] = self.tool_calls
                     self.tool_responses = []
                     for index, tool_call in enumerate(self.tool_calls):
                         self.dealing_call_index = index
-                        if verify_json(tool_call["function"]["arguments"]):
-                            yield f"---工具调用---\n函数: {tool_call['function']['name']}\n内容:\n{json.loads(tool_call['function']['arguments'])[self.tool_mappings[tool_call['function']['name']]]}"
-                            response = self.deal_function_call(tool_call)
+                        try:
+                            function_json = json.loads(tool_call["function"]["arguments"])
+                            yield f"---工具调用---\n函数: {tool_call['function']['name']}\n内容:\n{function_json[self.tool_mappings[tool_call['function']['name']]]}"
+                            response = self.deal_function_call(tool_call, function_json)
                             if response["ready"]:
                                 self.tool_responses.append({
                                     "role": "tool",
                                     "content": response["content"],
                                     "tool_call_id": tool_call["id"],
                                 })
-                                if "max_words" in response:
-                                    if len(response["content"]) > response["max_words"]:
-                                        response["content"] = response["content"][:response["max_words"]] + "..."
-                                yield f"---工具调用返回---\n内容:\n{response['content']}"
+                                if "to_user" not in response:
+                                    response["to_user"] = response["content"]
+                                yield f"---工具调用返回---\n内容:\n{response['to_user']}"
                             else:
                                 self.status = 1
                                 yield f"---调用需要确认---"
                                 return
-                        else:
-                            yield f"---工具调用---\n参数错误"
+                        except json.JSONDecodeError:
+                            self.tool_responses.append({
+                                "role": "tool",
+                                "content": "工具调用错误",
+                                "tool_call_id": tool_call["id"],
+                            })
+                            yield "---工具调用错误---"
                     if self.tool_responses:
                         self.messages.extend(self.tool_responses)
                         self.tool_responses = []
@@ -234,7 +251,8 @@ class CodeExecutor:
                 self.messages.pop()
                 if confimation.lower() in ["yes", "y"]:
                     current_call = self.tool_calls[self.dealing_call_index]
-                    response = self.deal_function_call(current_call, force=True)
+                    function_json = json.loads(current_call["function"]["arguments"])
+                    response = self.deal_function_call(current_call, function_json, force=True)
                     self.tool_responses.append({
                         "role": "tool",
                         "content": response["content"],
@@ -255,9 +273,10 @@ class CodeExecutor:
                 if len(self.tool_responses) != self.dealing_call_index + 1:
                     for index, tool_call in enumerate(self.tool_calls[self.dealing_call_index+1:]):
                         self.dealing_call_index = index
-                        if verify_json(tool_call["function"]["arguments"]):
-                            yield f"---工具调用---\n函数: {tool_call['function']['name']}\n内容:\n{tool_call['function']['arguments'][self.tool_mappings[tool_call['function']['name']]]}"
-                            response = self.deal_function_call(tool_call)
+                        try:
+                            function_json = json.loads(tool_call["function"]["arguments"])
+                            yield f"---工具调用---\n函数: {tool_call['function']['name']}\n内容:\n{function_json[self.tool_mappings[tool_call['function']['name']]]}"
+                            response = self.deal_function_call(tool_call, function_json)
                             if response["ready"]:
                                 yield f"---工具调用返回---\n内容:\n{response['content']}"
                                 self.tool_responses.append({
@@ -269,17 +288,18 @@ class CodeExecutor:
                                 self.status = 1
                                 yield f"---调用需要确认---"
                                 return
-                        else:
-                            yield f"---工具调用---\n参数错误"
+                        except json.JSONDecodeError:
+                            self.tool_responses.append({
+                                "role": "tool",
+                                "content": "工具调用错误",
+                                "tool_call_id": tool_call["id"],
+                            })
+                            yield "---工具调用错误---"
                 self.messages.extend(self.tool_responses)
                 self.tool_responses = []
                 yield from self.process()
     
-    def deal_function_call(self, tool_call, force=False):
-        try:
-            function_json = json.loads(tool_call["function"]["arguments"])
-        except json.JSONDecodeError:
-            return {"ready": True, "content": "JSON 格式错误！"}
+    def deal_function_call(self, tool_call, function_json, force=False):
         name = tool_call["function"]["name"]
         autorun = False
         if name in self.safe_tools or force:
@@ -313,6 +333,8 @@ class CodeExecutor:
                         response_content = self.spider.get_page_with_id(number)
                     except NameError:
                         return {"ready": True, "content": "还没有搜索！"}
+                    except IndexError:
+                        return {"ready": True, "content": "没有搜索结果！"}
                     except:
                         try:
                             if function_json["content"].startswith("http"):
@@ -321,9 +343,20 @@ class CodeExecutor:
                                 response_content = "访问搜索结果应输入数字！"
                         except Exception as e:
                             response_content = f"链接无法访问！\n{e}"
-                    return {"ready": True, "content": response_content, "max_words": 200}
+                        if len(response_content) > 200:
+                            to_user = response_content[:200] + "..."
+                        else:
+                            to_user = response_content
+                    return {"ready": True, "content": response_content, "to_user": to_user}
                 else:
                     return {"ready": False}
+            case "draw":
+                if autorun:
+                    pic_url = draw(function_json["prompt"])
+                    return {"ready": True, "content": "成功，已向用户展示", "to_user": f"[CQ:image,file={pic_url}]"}
+                else:
+                    return {"ready": False}
+
 
     def web_search(self, keyword):
         self.spider = WebSpider(keywords=[keyword], se="bing", pages=1)
@@ -437,12 +470,49 @@ def emo(img_url, audio_url, face_bbox, ext_bbox, style_level="active"):
     result = requests.post(url, headers=headers, data=json_data).json()
     return result["output"]["task_id"]
 
+def get_emo_result_loop(task_id):
+    '''emo模型结果获取'''
+    while True:
+        url = f"https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}"
+        headers = {"Authorization": ALIYUN_KEY}
+        result = requests.get(url, headers=headers).json()
+        if result["output"]["task_status"] == "SUCCEEDED":
+            return {"status": 1, "result": result["output"]["results"]["video_url"]}
+        elif result["output"]["task_status"] in ["RUNNING", "PENDING"]:
+            time.sleep(1)
+        else:
+            return {"status": 0, "result": result["output"]["message"]}
+
 def draw(prompt, model=DEFAULT_DRAWING_MODEL, size="1024x1024"):
     '''返回图像链接'''
-    client = OpenAI(api_key=PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"], base_url=PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"])
-    result = client.images.generate(
-        model=model,
-        prompt=prompt,
-        size=size,
-    )
-    return result.data[0].url
+    return aliyun_draw(prompt, model, size)
+#     client = OpenAI(api_key=PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"], base_url=PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"])
+#     result = client.images.generate(
+#         model=model,
+#         prompt=prompt,
+#         size=size,
+#     )
+#     return result.data[0].url
+
+# CNM阿里云为什么不支持openai格式
+def aliyun_draw(prompt, model=DEFAULT_DRAWING_MODEL, size="1024*1024"):
+    size = size.replace("x", "*")
+    url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
+    headers = {"Content-Type": "application/json","Authorization": f"Bearer {ALIYUN_KEY}", "X-DashScope-Async": "enable"}
+    data = {"model": model,"input": {"prompt": prompt}, "parameters": {"size": size, "add_sampling_metadata": False}}
+    response = requests.post(url, headers=headers, data=json.dumps(data)).json()
+    task_id = response["output"]["task_id"]
+    return get_aliyun_draw_result_loop(task_id)
+
+def get_aliyun_draw_result_loop(task_id):
+    '''阿里云画图模型结果获取'''
+    while True:
+        url = f"https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}"
+        headers = {"Authorization": ALIYUN_KEY}
+        result = requests.get(url, headers=headers).json()
+        if result["output"]["task_status"] == "SUCCEEDED":
+            return result["output"]["results"][0]["url"]
+        elif result["output"]["task_status"] in ["RUNNING", "PENDING"]:
+            time.sleep(1)
+        else:
+            raise Exception(result["output"]["message"])

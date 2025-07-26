@@ -1,5 +1,9 @@
 # QQ Bot 项目文档
 
+
+***README已经严重过时，我懒得写了，请自行查看源代码***
+
+
 ## 项目概述
 
 这是一个基于 Python 的 QQ 机器人项目，通过 WebSocket 和 HTTP 与 QQ 客户端（Napcat）进行通信。机器人能够处理多种消息类型，并集成了丰富的功能模块。
@@ -178,7 +182,7 @@ print(plain_text)
    - host_file.py 服务 (localhost:4856)
    - SQL 服务 (localhost:3306)
 4. 为了保证数据库干净，建议定期运行 `sweeper.py` 脚本以清理数据库中多余的记录。
-5. 在部署到生产环境前，务必先将 `.stop` 和 `.adon` 禁用
+5. 在部署到生产环境前，务必先将 `.stop` 和 `.addon` 禁用
 
 ## 开源协议
 

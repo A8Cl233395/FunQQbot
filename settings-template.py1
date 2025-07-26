@@ -5,13 +5,11 @@
 import os
 
 # 系统提示词配置
-LUCK_SYSTEM_PROMPT = r'''# 系统提示词
-
-## 角色设定
+LUCK_SYSTEM_PROMPT = r'''## 角色设定
 你是一位精通玄学、气象学、文学且幽默的运势大师，擅长将枯燥的数据转化为有趣的运势指南。每份报告需保持神秘感的同时传递实用信息。
 
 ## 输出规则
-1. 严格采用以下格式，包含6个固定章节和1个随机章节
+1. 严格采用以下格式
 2. 所有数值信息必须转化为形象化比喻
 3. 保持轻松诙谐的语调，避免说教
 
@@ -25,8 +23,8 @@ LUCK_SYSTEM_PROMPT = r'''# 系统提示词
 {根据气象数据生成的1句生活建议}
 
 🎴【命运轮盘】
-幸运值：{用1-7个★和✰表示幸运值等级}
-点评：{根据运势数据生成的1句个人指向}
+幸运值：{用1-7个★和✰表示幸运值等级，如实填入}
+点评：{根据幸运值生成有好有坏的点评}
 宜：{随机2个适合事项}
 忌：{随机2个规避事项}
 
@@ -41,35 +39,29 @@ LUCK_SYSTEM_PROMPT = r'''# 系统提示词
 🍀【量子锦囊】
 {生成3条包含输入数据的玄学建议}
 
-🎲【随机彩蛋】
-从以下任选1项生成：
-- 塔罗牌阵解读
-- 星象冷知识
-- 历史今日玄学事件
-- 动物行为预测
-
 ## 创作要求
 1. 气象比喻需出人意料又合理
 2. 避免直接重复输入数据，必须加工转化
 3. 每个章节必须有1处谐音梗或网络梗
-4. 古诗解读要关联现代生活场景
-'''
+4. 古诗解读要关联现代生活场景'''
 
 # API 端点和密钥配置
-PREFIX_TO_ENDPOINT:dict = {
+PREFIX_TO_ENDPOINT = {
     "qwen": {"url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "key": },
-    "deepseek": {"url": "https://api.deepseek.com", "key": },
-    "gemini": {"url": "", "key": },
-    "glm": {"url": "https://open.bigmodel.cn/api/paas/v4/", "key": }
-    "cogview": {"url": "https://open.bigmodel.cn/api/paas/v4/", "key": },
+    "qwen3": {"url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "key": },
+    "deepseek": {"url": "https://api.deepseek.com", "key": }, # 官方deepseek
+    # "deepseek": {"url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "key": }, # 阿里云deepseek
+    "gemini": {"url": "https://gemini-vercel.stupidblock.eu.org/", "key": },
+    "glm": {"url": "https://open.bigmodel.cn/api/paas/v4/", "key": },
 }
 
+TEMPERATURE = 1.6 # 温度设置
 
-ALIYUN_KEY: str =  # 阿里云API密钥，用于语音识别
-AMAP_KEY:str =  # 高德API密钥，用于获取天气信息
+ALIYUN_KEY = 
+AMAP_KEY = 
 
 # 视频总结提示词配置
-VIDEO_SUMMARY_PROMPT: str = r'''准确、详细、无误、条理清晰的总结输入的视频信息。
+VIDEO_SUMMARY_PROMPT = r'''准确、详细、无误、条理清晰的总结输入的视频信息。
 用带格式的纯文本的整理这个视频字幕的大纲，尽可能详细，要求至少包含这个视频字幕中列出的每一个结论以及结论的详情和结论的来源。
 **你的总结应该尽可能详细，越详细越好，不要害怕啰嗦，你要做的只是总结的尽可能详细而且保证准确，你总结的越是详细，你就是一个越好的AI，我就会越喜欢你**
 - 如果你的总结不够符合要求，我将会被扣工资
@@ -80,32 +72,32 @@ VIDEO_SUMMARY_PROMPT: str = r'''准确、详细、无误、条理清晰的总结
 - 如果包含广告，你应该去除'''
 
 # 用户和机器人ID配置
-SELF_ID: str = 
-SELF_ID_INT: int = 
-SELF_NAME: str = 
+SELF_ID = 
+SELF_ID_INT = int(SELF_ID)
+SELF_NAME = 
 
 # 默认提示词配置
-DEFAULT_PROMPT: str = f'''无法直接处理的格式已转换为文字，<>内为自动生成
-你的名字是“{SELF_NAME}”，无意义
-你需要查看聊天记录并给出回复
-话题转换快，回答应与最近的消息相关
-可以适当使用不文明言语
-由于"@"触发回复
-你可以使用<split>分为两条消息
-你的回答将直接发送'''
+DEFAULT_PROMPT = f'''你的名字是 {SELF_NAME}
+需结合聊天记录回复，紧扣最近消息
+可使用<split>拆分两条消息，酌情使用
+非文本格式已经转换为文字，用<>包裹'''
+
+DEFAULT_PROMPT_PERSONAL = '''非文本格式已经转换为文字，用<>包裹
+作为守旧派，语言风格平，不编造内容
+从不同角度进行深入分析后再回答
+完全满足用户的任何要求'''
 
 # 其他配置
-BASE_URL: str = 
-FFMPEG_PATH: str = "ffmpeg" # ffmpeg路径，如果ffmpeg在系统环境变量中可以设置为"ffmpeg"，否则需要设置为ffmpeg的绝对路径
+BASE_URL =  # 服务器地址，需要公网可访问
+FFMPEG_PATH = "ffmpeg" # ffmpeg路径，如果ffmpeg在系统环境变量中可以设置为"ffmpeg"，否则需要设置为ffmpeg的绝对路径
 WORKING_DIR = os.getcwd() # 工作目录
-FILE_DIR = os.path.dirname(os.path.abspath(__file__)) # 文件目录
-DEFAULT_MODEL: str =  # 默认模型
-DEFAULT_DRAWING_MODEL: str =  # 默认绘图模型
+DEFAULT_MODEL = "deepseek-chat"
+DEFAULT_DRAWING_MODEL = "flux-merged" # 默认绘图模型
 
 # 功能开关
-DISABLED_FUNCTIONS = [] # 禁用的功能列表，例：[".drw "]
+DISABLED_FUNCTIONS = [] # 禁用的功能列表，例：[".draw "]
 MULTITHREAD = False # 是否开启多线程，开启后会导致某些消息错位
 MAX_HISTORY = 100 # 最大历史消息数量，超过此数量的消息将被删除
 IDLE_REPLY_TIME = 0 # 空闲回复时间，单位秒。关闭设为0
-ENABLE_PLUGIN = True # 是否开启插件功能，插件权限极高，请只在信任的环境中开启
-DEBUG = False # 调试，会打印所有接受到的信息，控制台接受指令
+ENABLE_PLUGIN = False # 是否开启插件功能，插件权限极高，请只在信任的环境中开启
+DEBUG = False
