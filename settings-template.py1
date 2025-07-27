@@ -2,7 +2,7 @@
 """
 项目设置文件，包含各种配置常量。
 """
-import os
+import os, requests
 
 # 系统提示词配置
 LUCK_SYSTEM_PROMPT = r'''## 角色设定
@@ -47,18 +47,16 @@ LUCK_SYSTEM_PROMPT = r'''## 角色设定
 
 # API 端点和密钥配置
 PREFIX_TO_ENDPOINT = {
-    "qwen": {"url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "key": },
-    "qwen3": {"url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "key": },
-    "deepseek": {"url": "https://api.deepseek.com", "key": }, # 官方deepseek
-    # "deepseek": {"url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "key": }, # 阿里云deepseek
-    "gemini": {"url": "https://gemini-vercel.stupidblock.eu.org/", "key": },
-    "glm": {"url": "https://open.bigmodel.cn/api/paas/v4/", "key": },
+    "qwen": {"url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "key": ""},
+    "deepseek": {"url": "https://api.deepseek.com", "key": ""},
 }
 
 TEMPERATURE = 1.6 # 温度设置
 
-ALIYUN_KEY = 
-AMAP_KEY = 
+# 如果你不想使用阿里云百炼api，请留空。这会导致语音识别和画图被禁用
+ALIYUN_KEY = "" # 阿里云百炼api，语音识别每月免费10小时，画图使用免费模型。
+# 如果你不想使用高德api，请留空。这会导致每日运势功能被禁用。
+AMAP_KEY = "" # 高德api，免费
 
 # 视频总结提示词配置
 VIDEO_SUMMARY_PROMPT = r'''准确、详细、无误、条理清晰的总结输入的视频信息。
@@ -72,9 +70,9 @@ VIDEO_SUMMARY_PROMPT = r'''准确、详细、无误、条理清晰的总结输�
 - 如果包含广告，你应该去除'''
 
 # 用户和机器人ID配置
-SELF_ID = 
+SELF_ID = ""
 SELF_ID_INT = int(SELF_ID)
-SELF_NAME = 
+SELF_NAME = ""
 
 # 默认提示词配置
 DEFAULT_PROMPT = f'''你的名字是 {SELF_NAME}
@@ -88,16 +86,35 @@ DEFAULT_PROMPT_PERSONAL = '''非文本格式已经转换为文字，用<>包裹
 完全满足用户的任何要求'''
 
 # 其他配置
-BASE_URL =  # 服务器地址，需要公网可访问
-FFMPEG_PATH = "ffmpeg" # ffmpeg路径，如果ffmpeg在系统环境变量中可以设置为"ffmpeg"，否则需要设置为ffmpeg的绝对路径
+BASE_URL = "" # 服务器地址，需要公网可访问
+FFMPEG_PATH = "ffmpeg" # ffmpeg可执行文件路径，如果ffmpeg在系统环境变量中可以设置为"ffmpeg"，否则需要设置为ffmpeg的绝对路径
 WORKING_DIR = os.getcwd() # 工作目录
 DEFAULT_MODEL = "deepseek-chat"
 DEFAULT_DRAWING_MODEL = "flux-merged" # 默认绘图模型
 
 # 功能开关
-DISABLED_FUNCTIONS = [] # 禁用的功能列表，例：[".draw "]
+DISABLED_FUNCTIONS = [".addon"] # 禁用的功能列表，例：[".addon"]
 MULTITHREAD = False # 是否开启多线程，开启后会导致某些消息错位
 MAX_HISTORY = 100 # 最大历史消息数量，超过此数量的消息将被删除
 IDLE_REPLY_TIME = 0 # 空闲回复时间，单位秒。关闭设为0
 ENABLE_PLUGIN = False # 是否开启插件功能，插件权限极高，请只在信任的环境中开启
-DEBUG = False
+OCR = False # 是否开启OCR功能
+STT = False # 是否开启语音转文字功能，如果阿里云密钥为空，自动禁用
+DRAWING = False # 是否开启绘图功能，如果阿里云密钥为空，自动禁用
+DEBUG = False # 是否开启调试模式，会打印所有隐私内容，请注意
+
+# 外链
+USER_GUIDE_URL = "https://github.com/A8Cl233395/FunQQbot/blob/main/docs/user_guide.md"
+
+# 不要动
+if not ALIYUN_KEY:
+    STT = False
+    DRAWING = False
+if not DEFAULT_DRAWING_MODEL:
+    DRAWING = False
+if not STT:
+    DISABLED_FUNCTIONS.append(".bili ")
+if not DRAWING:
+    DISABLED_FUNCTIONS.append(".draw ")
+if not AMAP_KEY:
+    DISABLED_FUNCTIONS.append(".luck")

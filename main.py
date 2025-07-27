@@ -1,10 +1,9 @@
 import asyncio
 import websockets
+import random
 from services import *
 from shutil import copy
 from hashlib import md5
-from urllib3.exceptions import InsecureRequestWarning
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 from settings import *
 username_cache = {}
 groups = {}
@@ -26,8 +25,11 @@ def messages_to_text(data):
                     is_mentioned = True
                 output_text += f" {message_text}"
             case "image":
-                image_text = ocr(message["data"]["url"].replace("https", "http"))
-                output_text += f"<图片文字: {image_text}> "
+                if OCR:
+                    image_text = ocr(message["data"]["url"].replace("https", "http"))
+                    output_text += f"<图片文字: {image_text}> "
+                else:
+                    output_text += f"<图片> "
             case "json":
                 text = json.loads(message["data"]["data"])
                 output_text += f"<卡片: {text['prompt']}> "
@@ -36,12 +38,15 @@ def messages_to_text(data):
             case "video":
                 output_text += "<视频> "
             case "record":
-                time.sleep(1)
-                pos = message["data"]["path"]
-                silk_to_wav(pos, "./files/file.wav")
-                requests.get("https://localhost:4856/sec_check?arg=file.wav", verify=False)
-                text = stt(f"https://srv.{BASE_URL}:4856/download_fucking_file?filename=file.wav")
-                output_text += f"{text} "
+                if STT:
+                    time.sleep(1)
+                    pos = message["data"]["path"]
+                    silk_to_wav(pos, "./files/file.wav")
+                    requests.get("http://localhost:4856/sec_check?arg=file.wav")
+                    text = aliyun_stt(f"http://{BASE_URL}:4856/download_fucking_file?filename=file.wav")
+                    output_text += f"{text} "
+                else:
+                    output_text += "<语音> "
             case "at":
                 qq_id = message["data"]["qq"]
                 if qq_id == SELF_ID:
@@ -113,14 +118,14 @@ class Handle_group_message:
         self.group_id = group_id
         self.stored_messages = []
         self.original_messages = []
-        self.prompt = fetch_db("SELECT prompt FROM prompts WHERE owner = %s", (f"g{group_id}",))
+        self.prompt = fetch_db("SELECT prompt FROM prompts WHERE owner = ?", (f"g{group_id}",))
         if self.prompt:
             self.prompt= self.prompt[0][0]
-            self.model = fetch_db("SELECT model FROM bsettings WHERE owner = %s", (f"g{group_id}",))[0][0]
+            self.model = fetch_db("SELECT model FROM bsettings WHERE owner = ?", (f"g{group_id}",))[0][0]
         else:
             self.init()
         if ENABLE_PLUGIN:
-            plugin_test = fetch_db("SELECT code, data FROM plugins WHERE owner = %s", (f"g{group_id}",))
+            plugin_test = fetch_db("SELECT code, data FROM plugins WHERE owner = ?", (f"g{group_id}",))
             if plugin_test:
                 self.plugin = plugin_test[0][0]
                 self.plugin_data = eval(plugin_test[0][1])
@@ -192,7 +197,7 @@ class Handle_group_message:
                 plugin_data_hash = md5(repr(self.plugin_data).encode()).hexdigest()
                 exec(self.plugin)
                 if md5(repr(self.plugin_data).encode()).hexdigest() != plugin_data_hash:
-                    db("UPDATE plugins SET data = %s WHERE owner = %s", (repr(self.plugin_data), f"g{self.group_id}"))
+                    db("UPDATE plugins SET data = ? WHERE owner = ?", (repr(self.plugin_data), f"g{self.group_id}"))
             except Exception as e:
                 message_send.append(f"插件执行失败，已在本次移除\n{e}")
                 self.plugin = None
@@ -227,9 +232,9 @@ class Handle_group_message:
         if self.original_messages[-2]["type"] != "file": #检查文件
             self.plugin = None
             del self.plugin_data
-            db("DELETE FROM plugins WHERE owner = %s", (f"g{self.group_id}",))
+            db("DELETE FROM plugins WHERE owner = ?", (f"g{self.group_id}",))
             return ["已移除插件"]
-        if self.original_messages[-2]["data"]["file"][-3:] != ".py": #检查是否为代码文件
+        if self.original_messages[-2]["data"]["file"][-3:] != ".py": #检查是否为.py文件
             return ["请发送.py文件"]
         pos = requests.post("http://127.0.0.1:3001/get_file", json={"file_id": self.original_messages[-2]["data"]["file_id"]}).json()["data"]["file"]
         try:
@@ -246,14 +251,14 @@ class Handle_group_message:
                     self.plugin_data = init_setting["plugin_data"]
                 else:
                     self.plugin_data = None
-            if fetch_db("SELECT code FROM plugins WHERE owner = %s", (f"g{self.group_id}",)):
+            if fetch_db("SELECT code FROM plugins WHERE owner = ?", (f"g{self.group_id}",)):
                 if init_setting["init"]:
-                    db("UPDATE plugins SET code = %s, data = %s WHERE owner = %s", (code, repr(self.plugin_data), f"g{self.group_id}"))
+                    db("UPDATE plugins SET code = ?, data = ? WHERE owner = ?", (code, repr(self.plugin_data), f"g{self.group_id}"))
                 else:
-                    db("UPDATE plugins SET code = %s WHERE owner = %s", (code, f"g{self.group_id}"))
+                    db("UPDATE plugins SET code = ? WHERE owner = ?", (code, f"g{self.group_id}"))
             else:
                 if init_setting["init"]:
-                    db("INSERT INTO plugins (owner, code, data) VALUES (%s, %s, %s)", (f"g{self.group_id}", code, repr(self.plugin_data)))
+                    db("INSERT INTO plugins (owner, code, data) VALUES (?, ?, ?)", (f"g{self.group_id}", code, repr(self.plugin_data)))
                 else:
                     return ["插件格式错误，缺少初始化"]
             self.plugin = compile(code, "<string>", "exec", optimize=2)
@@ -285,81 +290,49 @@ class Handle_group_message:
 诗: {get_poem()}
 一言: {get_tip()}'''
         result = ask_ai(LUCK_SYSTEM_PROMPT, content, model=self.model)
-        result = f"[CQ:at,qq={sender_id}] 你的每日运势从炉管出来了💥\n" + result
+        result = f"[CQ:at,qq={sender_id}] 你的每日运势出来了💥\n" + result
         return [result]
 
     def help(self):
-        return [f"https://www.{BASE_URL}/?p=77", "请复制到浏览器打开，时间可能较长"]
+        return [USER_GUIDE_URL, "请复制到浏览器打开，时间可能较长"]
 
     def clear(self):
         self.stored_messages = []
         return ["已清除聊天记录缓存"]
 
     def init(self):
-        db("INSERT INTO bsettings (owner, model) VALUES (%s, %s)", (f"g{self.group_id}", DEFAULT_MODEL))
-        db("INSERT INTO prompts (owner, prompt) VALUES (%s, %s)", (f"g{self.group_id}", DEFAULT_PROMPT))
+        db("INSERT INTO bsettings (owner, model) VALUES (?, ?)", (f"g{self.group_id}", DEFAULT_MODEL))
+        db("INSERT INTO prompts (owner, prompt) VALUES (?, ?)", (f"g{self.group_id}", DEFAULT_PROMPT))
+        db("INSERT INTO rsettings (owner, range1, range2) VALUES (?, ?, ?)", (f"g{self.group_id}", 1, 100))
         self.model = DEFAULT_MODEL
         self.prompt = DEFAULT_PROMPT
 
     def draw(self, command_content):
         url = draw(command_content)
         return [f"[CQ:image,file={url}]"]
-    
-    def video(self):
-        if self.original_messages[-3]["type"] == "image": #检查图片
-            if self.original_messages[-2]["type"] == "file": #检查文件
-                if self.original_messages[-2]["data"]["file"][-4:] in [".wav", ".mp3"]: #检查是否为音频文件
-                    pic = requests.get(self.original_messages[-3]["data"]["url"].replace("https", "http"))
-                    with open("./files/file_vid.jpg", "wb") as f:
-                        f.write(pic.content)
-                    requests.get(f"https://localhost:4856/sec_check?arg=file_vid.jpg", verify=False)
-                    requests.get(f"https://localhost:4856/sec_check?arg=file_vid.jpg", verify=False)
-                    detect = emo_detect(f"https://srv.{BASE_URL}:4856/download_fucking_file?filename=file_vid.jpg")
-                    if detect["output"]["check_pass"]:
-                        response = requests.post("http://127.0.0.1:3001/get_file", json={"file_id": self.original_messages[-2]["data"]["file_id"]}).json()
-                        copy(response["data"]["file"], rf"./files/file_vid{self.original_messages[-2]['data']['file'][-4:]}")
-                        requests.get(f"https://localhost:4856/sec_check?arg=file_vid{self.original_messages[-2]['data']['file'][-4:]}", verify=False)
-                        requests.get(f"https://localhost:4856/sec_check?arg=file_vid.jpg", verify=False)
-                        requests.get(f"https://localhost:4856/sec_check?arg=file_vid{self.original_messages[-2]['data']['file'][-4:]}", verify=False)
-                        requests.get(f"https://localhost:4856/sec_check?arg=file_vid.jpg", verify=False)
-                        task_id = emo(f"https://srv.{BASE_URL}:4856/download_fucking_file?filename=file_vid.jpg", f"https://srv.{BASE_URL}:4856/download_fucking_file?filename=file_vid{self.original_messages[-2]['data']['file'][-4:]}", detect["output"]["face_bbox"], detect["output"]["ext_bbox"])
-                        data = get_emo_result_loop(task_id)
-                        if data["status"]:
-                            return [f"[CQ:video,file={data['result']}]"]
-                        else:
-                            return [f"失败！信息：{data['result']}"]
-                else:
-                    return ["文件格式错误！请使用.wav或.mp3格式的文件"]
-            else:
-                return ["请发送图片和音频文件"]
-        else:
-            return ["请发送图片和音频文件"]
 
     def prompt_reset(self):
-        db("UPDATE prompts SET prompt = %s WHERE owner = %s", (DEFAULT_PROMPT, f"g{self.group_id}"))
+        db("UPDATE prompts SET prompt = ? WHERE owner = ?", (DEFAULT_PROMPT, f"g{self.group_id}"))
         self.prompt = DEFAULT_PROMPT
         return ["设置成功，默认提示为：" + DEFAULT_PROMPT]
 
     def prompt_set(self, command_content):
         self.prompt = command_content
-        db("UPDATE prompts SET prompt = %s WHERE owner = %s", (command_content, f"g{self.group_id}"))
+        if self.prompt.lower() in ["empty", "none", "0", "null", "void"]:
+            self.prompt = ""
+        db("UPDATE prompts SET prompt = ? WHERE owner = ?", (self.prompt, f"g{self.group_id}"))
         return ["设置成功"]
 
     def random_use(self):
-        result = fetch_db("SELECT range1, range2 FROM rsettings WHERE owner = %s", (f"g{self.group_id}",))
-        if result:
-            range1 = result[0][0]
-            range2 = result[0][1]
-        else:
-            range1 = 0
-            range2 = 1
-            db("INSERT INTO rsettings (owner, range1, range2) VALUES (%s, %s, %s)", (f"g{self.group_id}", 0, 1))
+        result = fetch_db("SELECT range1, range2 FROM rsettings WHERE owner = ?", (f"g{self.group_id}",))
+        range1 = result[0][0]
+        range2 = result[0][1]
         return [f"{range1} - {range2}之间的随机数: {random.randint(range1, range2)}"]
 
     def random_set(self, command_content):
         text_split = command_content.split()
         if len(text_split) == 2:
-            db("UPDATE rsettings SET range1 = %s, range2 = %s WHERE owner = %s", (text_split[0], text_split[1], f"g{self.group_id}"))
+            db("UPDATE rsettings SET range1 = ?, range2 = ? WHERE owner = ?", (text_split[0], text_split[1], f"g{self.group_id}"))
             return ["设置成功"]
         else:
             return ["设置失败"]
@@ -376,7 +349,7 @@ class Handle_group_message:
             return [temp]
         else:
             if command_content in model_list_cache:
-                db("UPDATE bsettings SET model = %s WHERE owner = %s", (command_content, f"g{self.group_id}"))
+                db("UPDATE bsettings SET model = ? WHERE owner = ?", (command_content, f"g{self.group_id}"))
                 self.model = command_content
                 return ["设置成功，你选择的模型为" + command_content]
             else:
@@ -386,10 +359,10 @@ class Handle_private_message:
     """私聊消息处理类"""
     def __init__(self, user_id):
         self.user_id = user_id
-        self.model = fetch_db("SELECT model FROM bsettings WHERE owner = %s", (f"p{user_id}",))
+        self.model = fetch_db("SELECT model FROM bsettings WHERE owner = ?", (f"p{user_id}",))
         if self.model:
             self.model = self.model[0][0]
-            self.prompt = fetch_db("SELECT prompt FROM prompts WHERE owner = %s", (f"p{user_id}",))[0][0]
+            self.prompt = fetch_db("SELECT prompt FROM prompts WHERE owner = ?", (f"p{user_id}",))[0][0]
         else:
             self.init()
         self.chatting = False
@@ -412,9 +385,10 @@ class Handle_private_message:
                 self.mappings.pop(i)
     
     def init(self):
-        db("INSERT INTO bsettings (owner, model) VALUES (%s, %s)", (f"p{self.user_id}", DEFAULT_MODEL))
-        db("INSERT INTO prompts (owner, prompt) VALUES (%s, %s)", (f"p{self.user_id}", DEFAULT_PROMPT))
-        db("INSERT INTO csettings (owner, tools) VALUES (%s, %s)", (f"p{self.user_id}", True))
+        db("INSERT INTO bsettings (owner, model) VALUES (?, ?)", (f"p{self.user_id}", DEFAULT_MODEL))
+        db("INSERT INTO prompts (owner, prompt) VALUES (?, ?)", (f"p{self.user_id}", DEFAULT_PROMPT_PERSONAL))
+        db("INSERT INTO csettings (owner, tools) VALUES (?, ?)", (f"p{self.user_id}", True))
+        db("INSERT INTO rsettings (owner, range1, range2) VALUES (?, ?, ?)", (f"p{self.user_id}", 1, 100))
         self.model = DEFAULT_MODEL
         self.prompt = DEFAULT_PROMPT
     
@@ -443,33 +417,30 @@ class Handle_private_message:
         return ["已停止，待手动检查"]
     
     def prompt_reset(self):
-        db("UPDATE prompts SET prompt = %s WHERE owner = %s", (DEFAULT_PROMPT, f"p{self.user_id}"))
+        db("UPDATE prompts SET prompt = ? WHERE owner = ?", (DEFAULT_PROMPT, f"p{self.user_id}"))
         self.prompt = DEFAULT_PROMPT
         return ["设置成功，默认提示为：" + DEFAULT_PROMPT]
     
     def prompt_set(self, command_content):
         self.prompt = command_content
-        db("UPDATE prompts SET prompt = %s WHERE owner = %s", (command_content, f"p{self.user_id}"))
+        if self.prompt.lower() in ["empty", "none", "0", "null", "void"]:
+            self.prompt = ""
+        db("UPDATE prompts SET prompt = ? WHERE owner = ?", (self.prompt, f"p{self.user_id}"))
         return ["设置成功"]
     
     def bilibili(self, command_content):
         return [formated_bili_summary(command_content)]
     
     def random_use(self):
-        result = fetch_db("SELECT range1, range2 FROM rsettings WHERE owner = %s", (f"p{self.user_id}",))
-        if result:
-            range1 = result[0][0]
-            range2 = result[0][1]
-        else:
-            range1 = 0
-            range2 = 1
-            db("INSERT INTO rsettings (owner, range1, range2) VALUES (%s, %s, %s)", (f"p{self.user_id}", 0, 1))
+        result = fetch_db("SELECT range1, range2 FROM rsettings WHERE owner = ?", (f"p{self.user_id}",))
+        range1 = result[0][0]
+        range2 = result[0][1]
         return [f"{range1} - {range2}之间的随机数: {random.randint(range1, range2)}"]
     
     def random_set(self, command_content):
         text_split = command_content.split()
         if len(text_split) == 2:
-            db("UPDATE rsettings SET range1 = %s, range2 = %s WHERE owner = %s", (text_split[0], text_split[1], f"p{self.user_id}"))
+            db("UPDATE rsettings SET range1 = ?, range2 = ? WHERE owner = ?", (text_split[0], text_split[1], f"p{self.user_id}"))
             return ["设置成功"]
         else:
             return ["设置失败"]
@@ -486,7 +457,7 @@ class Handle_private_message:
             return [temp]
         else:
             if command_content in model_list_cache:
-                db("UPDATE bsettings SET model = %s WHERE owner = %s", (command_content, f"p{self.user_id}"))
+                db("UPDATE bsettings SET model = ? WHERE owner = ?", (command_content, f"p{self.user_id}"))
                 self.model = command_content
                 return ["设置成功，你选择的模型为" + command_content]
             else:
@@ -502,7 +473,7 @@ class Handle_private_message:
             return ["聊天模式已关闭"]
         else:
             self.chatting = True
-            is_tools_allowed = fetch_db("SELECT tools FROM csettings WHERE owner = %s", (f"p{self.user_id}",))[0][0]
+            is_tools_allowed = fetch_db("SELECT tools FROM csettings WHERE owner = ?", (f"p{self.user_id}",))[0][0]
             self.chat_instance = CodeExecutor(model=self.model, messages=[{"role": "system", "content": self.prompt}], allow_tools=is_tools_allowed)
             return ["聊天模式已开启"]
     
@@ -517,16 +488,15 @@ class Handle_private_message:
         match settings[0]:
             case "tools":
                 if settings[1].lower() in ["on", "true", "1"]:
-                    db("UPDATE csettings SET tools = %s WHERE owner = %s", (True, f"p{self.user_id}"))
+                    db("UPDATE csettings SET tools = ? WHERE owner = ?", (True, f"p{self.user_id}"))
                     return ["已开启工具"]
                 elif settings[1].lower() in ["off", "false", "0"]:
-                    db("UPDATE csettings SET tools = %s WHERE owner = %s", (False, f"p{self.user_id}"))
+                    db("UPDATE csettings SET tools = ? WHERE owner = ?", (False, f"p{self.user_id}"))
                     return ["已关闭工具"]
                 else:
                     return ["参数错误"]
             case _:
                 return ["未知设置项"]
-
     
     async def chat(self, messages):
         self.chat_instance.new()
@@ -539,15 +509,20 @@ class Handle_private_message:
                 case "image":
                     if model_list_cache[self.model]["vision"] == 1:
                         self.chat_instance.add({"type": "image_url","image_url": {"url": message["data"]["url"].replace("https", "http")}})
-                    else:
+                    elif OCR:
                         image_text = ocr(message["data"]["url"].replace("https", "http"))
                         self.chat_instance.add({"type": "text", "text": f"<图片文字: {image_text}>"})
+                    else:
+                        self.chat_instance.add({"type": "text", "text": f"<图片>"})
                 case "json":
                     text = json.loads(message["data"]["data"])
                     match text["app"]:
                         case "com.tencent.music.lua":
-                            music_id = re.search(r'id=(\d+)', text["meta"]["music"]["musicUrl"]).group(1)
-                            self.chat_instance.add({"type": "text", "text": f"<音乐: {get_netease_music_details_text(music_id)}>"})
+                            try:
+                                music_id = re.search(r'id=(\d+)', text["meta"]["music"]["musicUrl"]).group(1)
+                                self.chat_instance.add({"type": "text", "text": f"<音乐: {get_netease_music_details_text(music_id)}>"})
+                            except:
+                                self.chat_instance.add({"type": "text", "text": f"<卡片: {text['prompt']}>"})
                         case _:
                             self.chat_instance.add({"type": "text", "text": f"<卡片: {text['prompt']}>"})
                 case "file":
@@ -557,12 +532,15 @@ class Handle_private_message:
                 case "video":
                     self.chat_instance.add({"type": "text", "text": "<视频>"})
                 case "record":
-                    asyncio.sleep(1)
-                    pos = message["data"]["path"]
-                    silk_to_wav(pos, "./files/file.wav")
-                    requests.get("https://localhost:4856/sec_check?arg=file.wav", verify=False)
-                    text = stt(f"https://srv.{BASE_URL}:4856/download_fucking_file?filename=file.wav")
-                    self.chat_instance.add({"type": "text", "text": text})
+                    if STT:
+                        asyncio.sleep(1)
+                        pos = message["data"]["path"]
+                        silk_to_wav(pos, "./files/file.wav")
+                        requests.get("http://localhost:4856/sec_check?arg=file.wav")
+                        text = aliyun_stt(f"http://{BASE_URL}:4856/download_fucking_file?filename=file.wav")
+                        self.chat_instance.add({"type": "text", "text": text})
+                    else:
+                        self.chat_instance.add({"type": "text", "text": "<语音>"})
                 case "reply":
                     reply_data = get_message(message["data"]["id"])
                     text = messages_to_text(reply_data)[0]
@@ -604,12 +582,7 @@ def get_username(id, times = 0):
         if times < 2:
             return get_username(id, times + 1)
         else:
-            print("---get_username---")
-            print(result)
-            print("---")
-            print(e)
-            print("---")
-            return None
+            raise e
 
 def draw_tarot_cards(spread_type = 'three_card', custom_draw = None):
     # 塔罗牌生成器
@@ -682,13 +655,6 @@ def get_message(id):
     result = requests.post("http://127.0.0.1:3001/get_msg", json={"message_id": id}).json()
     return result["data"]
 
-def get_group_members(group_id):
-    result = requests.post("http://127.0.0.1:3001/get_group_member_list", json={"group_id": group_id}).json()
-    members = []
-    members = [i["user_id"] for i in result["data"] if not i["is_robot"]]
-    members.remove(SELF_ID_INT)
-    return members
-
 def formated_bili_summary(text, model=DEFAULT_MODEL):
     user_input = text.replace(".bil ", "")
     data = get_bili_text(user_input)
@@ -708,13 +674,6 @@ def formated_bili_summary(text, model=DEFAULT_MODEL):
         return "Failed"
     elif status == 2:
         return f'''[CQ:image,file={data["pic_url"]}]标题: {data["title"]}\n简介: {data["desc"]}\n标签: {data["tag"]}'''
-
-def get_foward_messages(id):
-    '''返回messages'''
-    result = requests.post("http://127.0.0.1:3001/get_forward_msg", json={"message_id": id}).json()
-    data = result["data"]["messages"]
-    return data
-
 
 async def send_group_message(group_id, message):
     """发送群消息"""

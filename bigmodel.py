@@ -1,17 +1,11 @@
 import json
-import os
-import dashscope
-import requests
 from PIL import Image
 from io import BytesIO
 from openai import OpenAI
 from spider import *
 import subprocess
 import base64
-from urllib3.exceptions import InsecureRequestWarning
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 from settings import *
-dashscope.api_key = ALIYUN_KEY
 
 def ask_ai(prompt, content, model=DEFAULT_MODEL, temperature=TEMPERATURE):
     url = PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"]
@@ -131,6 +125,12 @@ class CodeExecutor:
                 },
             },
         ]
+        if not DRAWING:
+            self.tools.pop()
+        if messages:
+            if messages[0]["role"] == "system":
+                if not messages[0]["content"]:
+                    messages.pop(0)
         self.tools = self.tools if allow_tools else []
         self.safe_tools = ["send_file", "web_search", "visit", "draw"]
         self.status = 0
@@ -357,7 +357,6 @@ class CodeExecutor:
                 else:
                     return {"ready": False}
 
-
     def web_search(self, keyword):
         self.spider = WebSpider(keywords=[keyword], se="bing", pages=1)
         self.spider.start_crawling()
@@ -381,35 +380,43 @@ class CodeExecutor:
 
     def host_file(self, filename):
         if os.path.exists(rf"{self.cwd}\{filename}"):
-            requests.get(f"https://localhost:4856/sec_check?arg={filename}", verify=False)
-            return f"https://{BASE_URL}:4856/wf_file?filename={filename}"
+            requests.get(f"http://localhost:4856/sec_check?arg={filename}")
+            return f"http://{BASE_URL}:4856/wf_file?filename={filename}"
         else:
             return "找不到文件"
 
-# def voice_gen(text):
-#     result = SpeechSynthesizer.call(model='sambert-zhimiao-emo-v1',
-#                                     text=text,
-#                                     sample_rate=48000,
-#                                     format='wav')
-#     if result.get_audio_data() is not None:
-#         with open('output.wav', 'wb') as f:
-#             f.write(result.get_audio_data())
-
-
-def stt(file_path):
-    task_response = dashscope.audio.asr.Transcription.async_call(
-        model='paraformer-v1',
-        file_urls=[file_path],
-    )
-    transcribe_response = dashscope.audio.asr.Transcription.wait(
-        task=task_response.output.task_id)
-    data = json.loads(str(transcribe_response.output))
-    url = data["results"][0]["transcription_url"]
-    text_json = requests.get(url).json()
+def aliyun_stt(file_url, model="paraformer-v2"):
+    url = "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription"
+    headers = {
+        "Authorization": f"Bearer {ALIYUN_KEY}",
+        "Content-Type": "application/json",
+        "X-DashScope-Async": "enable"
+    }
+    data = {
+        "model": model,
+        "file_urls": [file_url],
+    }
+    result = requests.post(url, json=data, headers=headers).json()
+    task_id = result["output"]["task_id"]
+    result_url = get_aliyun_stt_result_loop(task_id)
+    text_json = requests.get(result_url).json()
     text = text_json["transcripts"][0]['text']
     return text
 
-def url_to_b64(url: str) -> str:
+def get_aliyun_stt_result_loop(task_id):
+    url = f"https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}"
+    headers = {"Authorization": f"Bearer {ALIYUN_KEY}"}
+    while True:
+        result = requests.get(url, headers=headers).json()
+        if result["output"]["task_status"] == "SUCCEEDED":
+            return result["results"][0]["transcription_url"]
+        elif result["output"]["task_status"] in ["RUNNING", "PENDING"]:
+            time.sleep(1)
+        else:
+            raise Exception(result["results"][0]["message"])
+
+
+def url_to_b64(url):
     response = requests.get(url)
     # 使用BytesIO读取图片内容
     image = Image.open(BytesIO(response.content))
@@ -453,36 +460,6 @@ def ocr(url: str) -> str:
     ocr_cache[url] = result
     return result
 
-def emo_detect(img_url, ratio="1:1"):
-    '''返回检测结果 json'''
-    url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/image2video/face-detect"
-    headers = {"Content-Type": "application/json","Authorization": f"Bearer {ALIYUN_KEY}"}
-    data = {"model": "emo-detect-v1","input": {"image_url": img_url}, "parameters": {"ratio": ratio}}
-    detect_result = requests.post(url, headers=headers, data=json.dumps(data)).json()
-    return detect_result
-
-def emo(img_url, audio_url, face_bbox, ext_bbox, style_level="active"):
-    '''返回task_id 字符串'''
-    url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/image2video/video-synthesis/"
-    headers = {"Content-Type": "application/json","Authorization": f"Bearer {ALIYUN_KEY}", "X-DashScope-Async": "enable"}
-    data = {"model": "emo-v1","input": {"image_url": img_url, "audio_url": audio_url, "face_bbox": face_bbox, "ext_bbox": ext_bbox}, "parameters": {"style_level": style_level}}
-    json_data = json.dumps(data)
-    result = requests.post(url, headers=headers, data=json_data).json()
-    return result["output"]["task_id"]
-
-def get_emo_result_loop(task_id):
-    '''emo模型结果获取'''
-    while True:
-        url = f"https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}"
-        headers = {"Authorization": ALIYUN_KEY}
-        result = requests.get(url, headers=headers).json()
-        if result["output"]["task_status"] == "SUCCEEDED":
-            return {"status": 1, "result": result["output"]["results"]["video_url"]}
-        elif result["output"]["task_status"] in ["RUNNING", "PENDING"]:
-            time.sleep(1)
-        else:
-            return {"status": 0, "result": result["output"]["message"]}
-
 def draw(prompt, model=DEFAULT_DRAWING_MODEL, size="1024x1024"):
     '''返回图像链接'''
     return aliyun_draw(prompt, model, size)
@@ -506,9 +483,9 @@ def aliyun_draw(prompt, model=DEFAULT_DRAWING_MODEL, size="1024*1024"):
 
 def get_aliyun_draw_result_loop(task_id):
     '''阿里云画图模型结果获取'''
+    url = f"https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}"
+    headers = {"Authorization": ALIYUN_KEY}
     while True:
-        url = f"https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}"
-        headers = {"Authorization": ALIYUN_KEY}
         result = requests.get(url, headers=headers).json()
         if result["output"]["task_status"] == "SUCCEEDED":
             return result["output"]["results"][0]["url"]
