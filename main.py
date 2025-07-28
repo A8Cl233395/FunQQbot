@@ -368,7 +368,6 @@ class Handle_private_message:
         self.chatting = False
         # a: text
         self.mappings = {
-            ".stop": lambda a: self.stop(),
             ".prompt ": lambda a: self.prompt_set(a),
             ".prompt": lambda a: self.prompt_reset(),
             ".bili ": lambda a: self.bilibili(a),
@@ -411,10 +410,6 @@ class Handle_private_message:
         # 处理聊天模式
         if self.chatting and not command_handled:
             await self.chat(messages["message"])
-    
-    def stop(self):
-        breakpoint()
-        return ["已停止，待手动检查"]
     
     def prompt_reset(self):
         db("UPDATE prompts SET prompt = ? WHERE owner = ?", (DEFAULT_PROMPT, f"p{self.user_id}"))
