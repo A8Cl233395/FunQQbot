@@ -1,10 +1,10 @@
 import asyncio
 import websockets
 import random
-from services import *
+from bigmodel import *
 from shutil import copy
 from hashlib import md5
-from settings import *
+
 username_cache = {}
 groups = {}
 users = {}
@@ -366,7 +366,7 @@ class Handle_private_message:
         else:
             self.init()
         self.chatting = False
-        # a: text
+        # a: command_content
         self.mappings = {
             ".prompt ": lambda a: self.prompt_set(a),
             ".prompt": lambda a: self.prompt_reset(),
@@ -649,26 +649,6 @@ def parse_to_narrative(card_list):
 def get_message(id):
     result = requests.post("http://127.0.0.1:3001/get_msg", json={"message_id": id}).json()
     return result["data"]
-
-def formated_bili_summary(text, model=DEFAULT_MODEL):
-    user_input = text.replace(".bil ", "")
-    data = get_bili_text(user_input)
-    status = data["status"]
-    if status == 1:
-        try:
-            text = f'''标题: {data["title"]}
-简介: {data["desc"]}
-标签: {data["tag"]}
-字幕: 
-{data["text"]}'''
-            summary = ask_ai(VIDEO_SUMMARY_PROMPT, text, model=model)
-            return f'''[CQ:image,file={data["pic_url"]}]标题: {data["title"]}\n简介: {data["desc"]}\n标签: {data["tag"]}\n总结: {summary}'''
-        except:
-            return f'''[CQ:image,file={data["pic_url"]}]标题: {data["title"]}\n简介: {data["desc"]}\n标签: {data["tag"]}\n无法总结'''
-    elif status == 0:
-        return "Failed"
-    elif status == 2:
-        return f'''[CQ:image,file={data["pic_url"]}]标题: {data["title"]}\n简介: {data["desc"]}\n标签: {data["tag"]}'''
 
 async def send_group_message(group_id, message):
     """发送群消息"""
