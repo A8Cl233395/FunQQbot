@@ -378,6 +378,7 @@ class Handle_private_message:
             ".chat": lambda a: self.toggle_chat(),
             ".draw ": lambda a: self.draw(a),
             ".chat ": lambda a: self.set_chat(a),
+            ".help": lambda a: self.help(),
         }
         for i in DISABLED_FUNCTIONS: # 禁用功能
             if i in self.mappings:
@@ -410,6 +411,9 @@ class Handle_private_message:
         # 处理聊天模式
         if self.chatting and not command_handled:
             await self.chat(messages["message"])
+
+    def help(self):
+        return [USER_GUIDE_URL, "请复制到浏览器打开，时间可能较长"]
     
     def prompt_reset(self):
         db("UPDATE prompts SET prompt = ? WHERE owner = ?", (DEFAULT_PROMPT, f"p{self.user_id}"))
@@ -695,6 +699,8 @@ async def handler(websocket):
                 if data["user_id"] not in users:
                     users[data["user_id"]] = Handle_private_message(data["user_id"])
                 await users[data["user_id"]].process(data)
+        elif "sub_type" in data and data["sub_type"] == "connect":
+            print("与Napcat链接成功！")
 
 def group_message_handler(messages, group_id, username, sender_id):
     if group_id not in groups:

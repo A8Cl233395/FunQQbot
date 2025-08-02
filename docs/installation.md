@@ -11,13 +11,17 @@
 3. **QQ**：
    - 下载地址：[https://im.qq.com/pcqq/index.shtml](https://im.qq.com/pcqq/index.shtml)
    - 下载最新版。
-4. **Umi-OCR**（可选，根据需求）：
+   - 安装后建议禁用**开机启动**。
+4. **Firefox**:
+   - 下载地址： [https://download-installer.cdn.mozilla.net/pub/firefox/releases/141.0/win64/zh-CN/Firefox%20Setup%20141.0.exe](https://download-installer.cdn.mozilla.net/pub/firefox/releases/141.0/win64/zh-CN/Firefox%20Setup%20141.0.exe)
+   - 安装Firefox。
+5. **Umi-OCR**（可选，根据需求）：
    - 下载地址：[https://github.com/hiroi-sora/Umi-OCR/releases/latest](https://github.com/hiroi-sora/Umi-OCR/releases/latest)
    - 注意：
-        - 如果不需要修改OCR函数或禁用OCR，则无需下载。
+        - 如果需要修改OCR函数或禁用OCR，则无需下载。
         - 奔腾、赛扬、凌动CPU请下载**Rapid引擎**版。
         - 其他CPU请下载**Paddle引擎**版。
-5. **FFmpeg**（可选）：
+6. **FFmpeg**（可选）：
    - 下载地址：[https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.7z](https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.7z)
    - 操作：下载后解压，并自行添加FFmpeg到环境变量或指定可执行文件路径。
    - 注意：如果后续设置中不想使用语音转文字（STT），可以关闭，则无需下载。

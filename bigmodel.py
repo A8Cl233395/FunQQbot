@@ -59,12 +59,12 @@ class CodeExecutor:
                 "type": "function",
                 "function": {
                     "name": "visit",
-                    "description": "访问搜索结果或链接",
+                    "description": "直接访问链接或使用序号访问搜索结果，返回网页中解析后的文字",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "content": {
-                                "description": "数字序号/链接",
+                                "description": "链接/数字序号",
                                 "type": "string",
                             },
                         },
@@ -290,10 +290,10 @@ class CodeExecutor:
                         result = self.get_page_text_with_parser(keyword)
                     keyword = function_json["keyword"]
                     result = self.web_search(keyword)
-                    if len(response_content) > 200:
-                        to_user = response_content[:200] + "..."
+                    if len(result) > 200:
+                        to_user = result[:200] + "..."
                     else:
-                        to_user = response_content
+                        to_user = result
                     return {"ready": True, "content": result, "to_user": to_user}
                 else:
                     return {"ready": False}
@@ -324,7 +324,7 @@ class CodeExecutor:
             case "draw":
                 if autorun:
                     pic_url = draw(function_json["prompt"])
-                    return {"ready": True, "content": "成功，已向用户展示", "to_user": f"[CQ:image,file={pic_url}]"}
+                    return {"ready": True, "content": "成功，已向用户展示图片", "to_user": f"[CQ:image,file={pic_url}]"}
                 else:
                     return {"ready": False}
 
