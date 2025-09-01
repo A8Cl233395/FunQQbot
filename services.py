@@ -42,7 +42,7 @@ def get_bili_text(user_input):
     text = aliyun_stt(f"http://{BASE_URL}:4856/download_fucking_file?filename=file.mp3")
     return {"status": 1, 'title': title, 'pic_url': pic_url, 'desc': desc, 'text': text, 'tag': tag}
 
-def formated_bili_summary(command_content, model=DEFAULT_MODEL):
+def formatted_bili_summary(command_content, model=DEFAULT_MODEL):
     data = get_bili_text(command_content)
     status = data["status"]
     if status == 1:
@@ -140,6 +140,7 @@ def get_netease_music_details_text(song_id, comment_limit=5):
     name = song_detail_json["name"]
     artists = [artist["name"] for artist in song_detail_json["artists"]]
     transname = song_detail_json["transName"] if "transName" in song_detail_json else None
+    alias = song_detail_json["alias"][0] if "alias" in song_detail_json and song_detail_json["alias"] else None
 
     comment_json = requests.get(comment_api).json()
     hot_comments = comment_json["hotComments"]
@@ -147,6 +148,7 @@ def get_netease_music_details_text(song_id, comment_limit=5):
     comments_text = "\n\n".join(comments).strip()
     combined += f"曲名: {name}\n"
     combined += f"翻译名: {transname}\n" if transname else ""
+    combined += f"别名: {alias}\n" if alias else ""
     combined += f"歌手: {', '.join(artists)}\n"
     combined += f"歌词:\n```\n{combined_lyrics_text}\n```\n"
     combined += f"热评:\n```\n{comments_text}\n```"

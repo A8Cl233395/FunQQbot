@@ -21,7 +21,9 @@
 - **`.model [模型名]`**  
   切换AI模型
   - `.model ls`：查看可用模型列表
-  - 示例：`.model gpt-4`
+  - 示例：`.model qwen_plus`
+  - 支持切换思考模式（仅限支持的模型）
+    - 示例：`.model qwen-plus;thinking` 或 `.model qwen-plus;nonthinking`
 
 - **`.prompt`**  
   重置为默认提示词

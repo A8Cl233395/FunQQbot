@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 项目设置文件，包含各种配置常量。
+这只是个示例，请不要直接使用！！！！！！！！
 """
 import os, requests
 
@@ -48,7 +49,17 @@ LUCK_SYSTEM_PROMPT = r'''## 角色设定
 # API 端点和密钥配置
 PREFIX_TO_ENDPOINT = {
     "qwen": {"url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "key": ""},
-    "deepseek": {"url": "https://api.deepseek.com", "key": ""},
+    "deepseek": {"url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "key": ""},
+}
+
+# 2in1仅支持阿里云百炼格式。若要使用其他提供方的端点，请将2in1设为False防止出现问题
+MODEL_DESCRIPTIONS = {
+    "deepseek-v3.1": {"description": "DeepSeek-V3.1为混合推理架构模型，同时支持思考模式与非思考模式，具备更高的推理效率和更强的Agent能力。", "vision": False, "2in1": True},
+    "deepseek-r1-0528": {"description": "0528为R1模型的小版本升级，相较于旧版 R1，新版在复杂推理任务中的表现有了显著提升。在数学、编程与通用逻辑等多个基准测评中取得了优异成绩。", "vision": False, "2in1": False},
+    "qwen-flash": {"description": "Qwen3系列Flash模型，实现思考模式和非思考模式的有效融合，可在对话中切换模式。复杂推理类任务性能优秀，指令遵循、文本理解等能力显著提高。支持1M上下文长度，按照上下文长度进行阶梯计费。", "vision": False, "2in1": True},
+    "qwen-plus": {"description": "Qwen3系列Plus模型，实现思考模式和非思考模式的有效融合，可在对话中切换模式。推理能力显著超过QwQ、通用能力显著超过Qwen2.5-Plus，达到同规模业界SOTA水平。", "vision": False, "2in1": True},
+    "qwen-max": {"description": "通义千问2.5系列千亿级别超大规模语言模型，支持中文、英文等不同语言输入。随着模型的升级，qwen-max将滚动更新升级。如果希望使用固定版本，请使用历史快照版本。", "vision": False, "2in1": False},
+    "qwen-vl-plus": {"description": "通义千问VL-Plus（qwen-vl-plus），即通义千问大规模视觉语言模型增强版。大幅提升细节识别能力和文字识别能力，支持超百万像素分辨率和任意长宽比规格的图像。在广泛的视觉任务上提供卓越的性能。", "vision": True, "2in1": False},
 }
 
 TEMPERATURE = 1.6 # 温度设置
@@ -89,7 +100,7 @@ DEFAULT_PROMPT_PERSONAL = '''非文本格式已经转换为文字，用<>包裹
 BASE_URL = "" # 服务器地址，需要公网可访问
 FFMPEG_PATH = "ffmpeg" # ffmpeg可执行文件路径，如果ffmpeg在系统环境变量中可以设置为"ffmpeg"，否则需要设置为ffmpeg的绝对路径
 WORKING_DIR = os.getcwd() # 工作目录
-DEFAULT_MODEL = "deepseek-chat"
+DEFAULT_MODEL = "deepseek-v3.1"
 DEFAULT_DRAWING_MODEL = "flux-merged" # 默认绘图模型
 
 # 功能开关

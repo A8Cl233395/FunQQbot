@@ -2,7 +2,7 @@ from services import *
 
 class CodeExecutor:
     def __init__(self, model=DEFAULT_MODEL, messages=[], allow_tools=True):
-        self.client = OpenAI(base_url=PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"], api_key=PREFIX_TO_ENDPOINT[model.split("-")[0]]["key"])
+        self.oclient = get_oclient(model)
         self.tools = [
             {
                 "type": "function",
@@ -51,7 +51,7 @@ class CodeExecutor:
                                 "type": "string",
                             },
                         },
-                        "required": ["content"]
+                        "required": ["keyword"]
                     },
                 },
             },
@@ -115,7 +115,14 @@ class CodeExecutor:
         }
         if self.tools:
             params["tools"] = self.tools
-        completion = self.client.chat.completions.create(**params)
+        model_infos = self.model.split(";")
+        if len(model_infos) == 2:
+            if model_infos[1] == "nonthinking":
+                params["extra_body"] = {"enable_thinking": False}
+            elif model_infos[1] == "thinking":
+                params["extra_body"] = {"enable_thinking": True}
+            params["model"] = model_infos[0]
+        completion = self.oclient.chat.completions.create(**params)
         return completion
     
     def process(self):

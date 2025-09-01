@@ -1,5 +1,4 @@
-.vscode/
-__pycache__/
+__pycache__
 settings.py
 test.py
 test2.py

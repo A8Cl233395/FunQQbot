@@ -215,9 +215,9 @@ class Handle_group_message:
             else:
                 command_type = plain_text_slices[0] + " "
             if command_type in self.mappings: # 检查指令是否存在
-                command_content = plain_text[len(command_type):]
-                command_result = plain_text[command_type](command_content, sender_id)
-                message_send.extend(command_result)
+                command_content = text[len(command_type):]
+                result = self.mappings[command_type](command_content)
+                message_send.extend(result)
         for i in message_send:
             self.stored_messages.append(f"{SELF_NAME}: {i}")
             await send_group_message(self.group_id, i)
@@ -338,22 +338,31 @@ class Handle_group_message:
             return ["设置失败"]
     
     def set_model(self, command_content):
-        global model_list_cache
-        result = fetch_db("SELECT * FROM mdesc")
-        for i in result:
-            model_list_cache[i[0]] = {"des": i[1], "vision": i[2]}
         if command_content in ["ls", "list", "help"]:
             temp = "模型列表: "
-            for i in model_list_cache:
-                temp += f'''\n    {i}: {model_list_cache[i]["des"]}'''
+            for name, info in MODEL_DESCRIPTIONS.items():
+                temp += f'''\n    {name}: {info["description"]}'''
+                if info["vision"]:
+                    temp += "（支持图片）"
+                if info["2in1"]:
+                    temp += "（支持切换思考模式）"
             return [temp]
         else:
-            if command_content in model_list_cache:
-                db("UPDATE bsettings SET model = ? WHERE owner = ?", (command_content, f"g{self.group_id}"))
-                self.model = command_content
-                return ["设置成功，你选择的模型为" + command_content]
+            model_infos = command_content.split(";")
+            if model_infos[0] in MODEL_DESCRIPTIONS:
+                if len(model_infos) == 2 and model_infos[1] in ["nonthinking", "thinking"] and MODEL_DESCRIPTIONS[model_infos[0]]["2in1"]:
+                    db("UPDATE bsettings SET model = ? WHERE owner = ?", (command_content, f"g{self.group_id}"))
+                    self.model = command_content
+                    return [f"设置成功，你选择的模型为{model_infos[0]}，使用{model_infos[1]}模式"]
+                elif len(model_infos) == 1:
+                    db("UPDATE bsettings SET model = ? WHERE owner = ?", (command_content, f"g{self.group_id}"))
+                    self.model = command_content
+                    return ["设置成功，你选择的模型为" + model_infos[0]]
+                else:
+                    return ["模式设置错误，请选择thinking或nonthinking"]
             else:
-                return ["模型不存在"]
+                return ["模型不存在，请使用.model list来查看模型列表"]
+
 
 class Handle_private_message:
     """私聊消息处理类"""
@@ -416,9 +425,9 @@ class Handle_private_message:
         return [USER_GUIDE_URL, "请复制到浏览器打开，时间可能较长"]
     
     def prompt_reset(self):
-        db("UPDATE prompts SET prompt = ? WHERE owner = ?", (DEFAULT_PROMPT, f"p{self.user_id}"))
+        db("UPDATE prompts SET prompt = ? WHERE owner = ?", (DEFAULT_PROMPT_PERSONAL, f"p{self.user_id}"))
         self.prompt = DEFAULT_PROMPT
-        return ["设置成功，默认提示为：" + DEFAULT_PROMPT]
+        return ["设置成功，默认提示为：" + DEFAULT_PROMPT_PERSONAL]
     
     def prompt_set(self, command_content):
         self.prompt = command_content
@@ -428,7 +437,7 @@ class Handle_private_message:
         return ["设置成功"]
     
     def bilibili(self, command_content):
-        return [formated_bili_summary(command_content)]
+        return [formatted_bili_summary(command_content)]
     
     def random_use(self):
         result = fetch_db("SELECT range1, range2 FROM rsettings WHERE owner = ?", (f"p{self.user_id}",))
@@ -445,22 +454,30 @@ class Handle_private_message:
             return ["设置失败"]
     
     def set_model(self, command_content):
-        global model_list_cache
-        result = fetch_db("SELECT * FROM mdesc")
-        for i in result:
-            model_list_cache[i[0]] = {"des": i[1], "vision": i[2]}
         if command_content in ["ls", "list", "help"]:
             temp = "模型列表: "
-            for i in model_list_cache:
-                temp += f'''\n    {i}: {model_list_cache[i]["des"]}'''
+            for name, info in MODEL_DESCRIPTIONS.items():
+                temp += f'''\n    {name}: {info["description"]}'''
+                if info["vision"]:
+                    temp += "（支持图片）"
+                if info["2in1"]:
+                    temp += "（支持切换思考模式）"
             return [temp]
         else:
-            if command_content in model_list_cache:
-                db("UPDATE bsettings SET model = ? WHERE owner = ?", (command_content, f"p{self.user_id}"))
-                self.model = command_content
-                return ["设置成功，你选择的模型为" + command_content]
+            model_infos = command_content.split(";")
+            if model_infos[0] in MODEL_DESCRIPTIONS:
+                if len(model_infos) == 2 and model_infos[1] in ["nonthinking", "thinking"] and MODEL_DESCRIPTIONS[model_infos[0]]["2in1"]:
+                    db("UPDATE bsettings SET model = ? WHERE owner = ?", (command_content, f"p{self.user_id}"))
+                    self.model = command_content
+                    return [f"设置成功，你选择的模型为{model_infos[0]}，使用{model_infos[1]}模式"]
+                elif len(model_infos) == 1:
+                    db("UPDATE bsettings SET model = ? WHERE owner = ?", (command_content, f"p{self.user_id}"))
+                    self.model = command_content
+                    return ["设置成功，你选择的模型为" + model_infos[0]]
+                else:
+                    return ["模式设置错误，请选择thinking或nonthinking"]
             else:
-                return ["模型不存在"]
+                return ["模型不存在，请使用.model list来查看模型列表"]
     
     def ping(self):
         return ["Pong!"]
@@ -506,7 +523,7 @@ class Handle_private_message:
                     contains_text = True
                     self.chat_instance.add({"type": "text", "text": message["data"]["text"]})
                 case "image":
-                    if model_list_cache[self.model]["vision"] == 1:
+                    if MODEL_DESCRIPTIONS[self.model.split(";")[0]]["vision"]:
                         self.chat_instance.add({"type": "image_url","image_url": {"url": message["data"]["url"].replace("https", "http")}})
                     elif OCR:
                         image_text = ocr(message["data"]["url"].replace("https", "http"))
@@ -531,8 +548,9 @@ class Handle_private_message:
                 case "video":
                     self.chat_instance.add({"type": "text", "text": "<视频>"})
                 case "record":
+                    contains_text = True
                     if STT:
-                        asyncio.sleep(1)
+                        time.sleep(1)
                         pos = message["data"]["path"]
                         silk_to_wav(pos, "./files/file.wav")
                         requests.get("http://localhost:4856/sec_check?arg=file.wav")
@@ -700,7 +718,7 @@ async def handler(websocket):
                     users[data["user_id"]] = Handle_private_message(data["user_id"])
                 await users[data["user_id"]].process(data)
         elif "sub_type" in data and data["sub_type"] == "connect":
-            print("与Napcat链接成功！")
+            print("与Napcat连接成功！")
 
 def group_message_handler(messages, group_id, username, sender_id):
     if group_id not in groups:
@@ -748,10 +766,6 @@ def start_server():
         event_loop.close()
 
 if __name__ == "__main__":
-    model_list_cache = {}
-    result = fetch_db("SELECT * FROM mdesc")
-    for i in result:
-        model_list_cache[i[0]] = {"des": i[1], "vision": i[2]}
-    print("启动中...")
+    print("正在启动WebSocket服务器...")
     # subprocess.Popen("python host_file.py")
     start_server()

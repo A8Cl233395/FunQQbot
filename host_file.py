@@ -18,7 +18,7 @@ def download_file():
 @app.route('/favicon.ico')
 def favicon():
     try:
-        return send_from_directory(directory=f"{WORKING_DIR}/files", path="web2.ico")
+        return send_from_directory(directory=f"{WORKING_DIR}/files", path="web.ico")
     except FileNotFoundError:
         abort(404)
 

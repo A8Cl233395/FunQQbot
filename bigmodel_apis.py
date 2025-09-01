@@ -7,32 +7,57 @@ import base64
 import requests
 from settings import *
 
+print("正在初始化OpenAI客户端...")
+oclients = {}
+for model, info in PREFIX_TO_ENDPOINT.items():
+    endpoint = info["url"]
+    api_key = info["key"]
+    oclients[endpoint] = OpenAI(api_key=api_key, base_url=endpoint)
+
+def get_oclient(model=DEFAULT_MODEL):
+    BASE_URL = PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"]
+    return oclients[BASE_URL]
+
 def ask_ai(prompt, content, model=DEFAULT_MODEL, temperature=TEMPERATURE):
-    url = PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"]
-    api_key = PREFIX_TO_ENDPOINT[model.split("-")[0]]["key"]
-    oclient = OpenAI(api_key=api_key, base_url=url)
+    oclient = get_oclient(model)
     if prompt:
         messages = [{"role": "system", "content": prompt}, {"role": "user", "content": content}]
     else:
         messages = [{"role": "user", "content": content}]
-    response = oclient.chat.completions.create(
-        model=model,
-        messages=messages,
-        stream=False,
-        temperature=temperature,
-    )
+    params = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "temperature": temperature,
+    }
+    model_infos = model.split(";")
+    if len(model_infos) == 2:
+        if model_infos[1] == "nonthinking":
+            params["extra_body"] = {"enable_thinking": False}
+        elif model_infos[1] == "thinking":
+            params["extra_body"] = {"enable_thinking": True}
+        params["model"] = model_infos[0]
+
+    response = oclient.chat.completions.create(**params)
     return response.choices[0].message.content
 
-def ai(messages,model=DEFAULT_MODEL, temperature=TEMPERATURE):
-    url = PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"]
-    api_key = PREFIX_TO_ENDPOINT[model.split("-")[0]]["key"]
-    oclient = OpenAI(api_key=api_key, base_url=url)
-    response = oclient.chat.completions.create(
-        model=model,
-        messages=messages,
-        stream=False,
-        temperature=temperature,
-    )
+def ai(messages, model=DEFAULT_MODEL, temperature=TEMPERATURE):
+    oclient = get_oclient(model)
+    params = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "temperature": temperature,
+    }
+    model_infos = model.split(";")
+    if len(model_infos) == 2:
+        if model_infos[1] == "nonthinking":
+            params["extra_body"] = {"enable_thinking": False}
+        elif model_infos[1] == "thinking":
+            params["extra_body"] = {"enable_thinking": True}
+        params["model"] = model_infos[0]
+
+    response = oclient.chat.completions.create(**params)
     return response.choices[0].message.content
 
 def aliyun_stt(file_url, model="paraformer-v2"):
@@ -115,8 +140,8 @@ def ocr(url: str) -> str:
 def draw(prompt, model=DEFAULT_DRAWING_MODEL, size="1024x1024"):
     '''返回图像链接'''
     return aliyun_draw(prompt, model, size)
-#     client = OpenAI(api_key=PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"], base_url=PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"])
-#     result = client.images.generate(
+#     oclient = get_oclient(model)
+#     result = oclient.images.generate(
 #         model=model,
 #         prompt=prompt,
 #         size=size,

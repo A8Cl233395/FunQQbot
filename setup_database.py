@@ -24,13 +24,6 @@ create_tables_sql = [
     )
     """,
     """
-    CREATE TABLE `mdesc` (
-        `name` TEXT NULL DEFAULT NULL,
-        `des` TEXT NULL DEFAULT NULL,
-        `vision` TINYINT(1) NULL DEFAULT NULL
-    )
-    """,
-    """
     CREATE TABLE `plugins` (
         `owner` TEXT NULL DEFAULT NULL,
         `code` TEXT NULL DEFAULT NULL,
@@ -76,13 +69,3 @@ conn.commit()
 conn.close()
 
 print("Database created successfully with all tables at ./database.db")
-print("接下来，来添加模型。如果你不想让用户切换模型，请直接使用EXIT退出")
-while True:
-    model_name = input("请输入模型名称：")
-    if model_name.lower() == "EXIT":
-        break
-    model_desc = input("请输入模型描述：")
-    if model_desc.lower() == "EXIT":
-        break
-    db("INSERT INTO mdesc (name, des) VALUES (?, ?)", (model_name, model_desc))
-    print(f"请确保你在settings.py中正确的配置 {model_name.split('-')[0]} 的apikey和端点")
