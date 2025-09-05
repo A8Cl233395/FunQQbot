@@ -426,7 +426,7 @@ class Handle_private_message:
     
     def prompt_reset(self):
         db("UPDATE prompts SET prompt = ? WHERE owner = ?", (DEFAULT_PROMPT_PERSONAL, f"p{self.user_id}"))
-        self.prompt = DEFAULT_PROMPT
+        self.prompt = DEFAULT_PROMPT_PERSONAL
         return ["设置成功，默认提示为：" + DEFAULT_PROMPT_PERSONAL]
     
     def prompt_set(self, command_content):
