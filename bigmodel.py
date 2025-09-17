@@ -293,10 +293,15 @@ class CodeExecutor:
                     return {"ready": False}
             case "web_search":
                 if autorun:
-                    if re.match(r"[-A-Za-z0-9+&@#/%?=~_|!:,.;]+[-A-Za-z0-9+&@#/%=~_|]", function_json["keyword"]):
-                        result = self.get_page_text_with_parser(keyword)
                     keyword = function_json["keyword"]
-                    result = self.web_search(keyword)
+                    if re.match(r"[-A-Za-z0-9+&@#/%?=~_|!:,.;]+[-A-Za-z0-9+&@#/%=~_|]", keyword):
+                        try:
+                            result = self.get_page_text_with_parser(keyword)
+                        except:
+                            result = self.web_search(keyword)
+                    else:
+                        keyword = function_json["keyword"]
+                        result = self.web_search(keyword)
                     if len(result) > 200:
                         to_user = result[:200] + "..."
                     else:
@@ -336,8 +341,8 @@ class CodeExecutor:
                     return {"ready": False}
 
     def web_search(self, keyword):
-        self.spider = WebSpider(keywords=[keyword], se="bing", pages=1)
-        self.spider.start_crawling()
+        self.spider = BingSpider()
+        self.spider.search(keyword, pages=1, limit=5)
         response_content = self.spider.formatted()
         return response_content
 
@@ -358,7 +363,7 @@ class CodeExecutor:
 
     def host_file(self, filename):
         if os.path.exists(rf"{self.cwd}\{filename}"):
-            requests.get(f"http://localhost:4856/sec_check?arg={filename}")
-            return f"http://{BASE_URL}:4856/wf_file?filename={filename}"
+            requests.get(f"http://localhost:{PORT}/sec_check?arg={filename}")
+            return f"http://{BASE_URL}:{PORT}/wf_file?filename={filename}"
         else:
             return "找不到文件"

@@ -27,26 +27,26 @@ def messages_to_text(data):
             case "image":
                 if OCR:
                     image_text = ocr(message["data"]["url"].replace("https", "http"))
-                    output_text += f"<图片文字: {image_text}> "
+                    output_text += f" ```图片OCR结果\n{image_text}\n``` "
                 else:
-                    output_text += f"<图片> "
+                    output_text += f" <图片>"
             case "json":
                 text = json.loads(message["data"]["data"])
-                output_text += f"<卡片: {text['prompt']}> "
+                output_text += f" ```卡片\n{text['prompt']}\n```"
             case "file":
-                output_text += f"<文件名: {message['data']['file']}> "
+                output_text += f" ```文件\n名称: {message['data']['file']}\n```"
             case "video":
-                output_text += "<视频> "
+                output_text += " <视频>"
             case "record":
                 if STT:
                     time.sleep(1)
                     pos = message["data"]["path"]
                     silk_to_wav(pos, "./files/file.wav")
-                    requests.get("http://localhost:4856/sec_check?arg=file.wav")
-                    text = aliyun_stt(f"http://{BASE_URL}:4856/download_fucking_file?filename=file.wav")
-                    output_text += f"{text} "
+                    requests.get(f"http://localhost:{PORT}/sec_check?arg=file.wav")
+                    text = aliyun_stt(f"http://{BASE_URL}:{PORT}/download_fucking_file?filename=file.wav")
+                    output_text += f" {text}"
                 else:
-                    output_text += "<语音> "
+                    output_text += " <语音>"
             case "at":
                 qq_id = message["data"]["qq"]
                 if qq_id == SELF_ID:
@@ -58,24 +58,25 @@ def messages_to_text(data):
                 output_text += f"@{name}"
             case "reply":
                 reply_data = get_message(message["data"]["id"])
-                text = messages_to_text(reply_data)[0]
-                output_text += f"<回复: {text}> "
+                reply = messages_to_text(reply_data)[0]
+                marked_reply = "\n".join([f"> {i}" for i in reply.splitlines()])
+                output_text += marked_reply
             case "face":
-                output_text += "<表情> "
+                output_text += " <动画表情>"
             case "forward":
-                data = message["data"]["content"]
-                text = " "
-                for i in data:
+                foward_messages = message["data"]["content"]
+                text = ""
+                for i in foward_messages:
                     text += messages_to_text(i)[0] + "\n"
-                output_text += f"<合并转发开始>\n{text}\n<合并转发结束> "
+                output_text += f" ```合并转发内容\n{text}``` "
             case "markdown":
-                output_text += f"<markdown: {message['data']['content']}> "
+                output_text += f" ```markdown\n{message['data']['content']}\n```"
             case _:
-                output_text += f"<未知> "
+                output_text += f" <未知>"
                 print("发生错误")
                 print(message)
                 print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-    return username + ": " + output_text.strip(),output_text[1:], is_mentioned
+    return username + ": " + output_text.strip(), output_text[1:], is_mentioned
 
 def ai_reply(messages, model, prompt):
     """
@@ -94,7 +95,7 @@ def ai_reply(messages, model, prompt):
     
     # 调用大模型
     result = ask_ai(prompt, combined_text, model=model)
-    splited = result.split("<split>")
+    splited = result.splitlines()
     for i in range(len(splited)):
         real_text = splited[i]
         if real_text[:len(SELF_NAME)+1] == f"{SELF_NAME}：": # 处理多出来的名字
@@ -140,7 +141,6 @@ class Handle_group_message:
             ".luck": lambda a, b: self.luck(b),
             ".help": lambda a, b: self.help(),
             ".clear": lambda a, b: self.clear(),
-            ".tovideo": lambda a, b: self.video(),
             ".prompt": lambda a, b: self.prompt_reset(a),
             ".prompt ": lambda a, b: self.prompt_set(a),
             ".random": lambda a, b: self.random_use(),
@@ -173,7 +173,6 @@ class Handle_group_message:
                 self.last_time = time.time()  # 重置最后聊天时间
 
     async def process(self, messages):
-        sender_id = messages["sender"]["user_id"]
         message_send = []
         self.original_messages.extend(messages["message"]) # 记录原始消息
         if len(self.original_messages) > 10: # 缓存消息数量限制（原始）
@@ -553,8 +552,8 @@ class Handle_private_message:
                         time.sleep(1)
                         pos = message["data"]["path"]
                         silk_to_wav(pos, "./files/file.wav")
-                        requests.get("http://localhost:4856/sec_check?arg=file.wav")
-                        text = aliyun_stt(f"http://{BASE_URL}:4856/download_fucking_file?filename=file.wav")
+                        requests.get(f"http://localhost:{PORT}/sec_check?arg=file.wav")
+                        text = aliyun_stt(f"http://{BASE_URL}:{PORT}/download_fucking_file?filename=file.wav")
                         self.chat_instance.add({"type": "text", "text": text})
                     else:
                         self.chat_instance.add({"type": "text", "text": "<语音>"})
@@ -693,8 +692,6 @@ async def handler_multithread(websocket):
     global_websocket = websocket
     async for message in websocket:
         data = json.loads(message)
-        if DEBUG:
-            print(data)
         if "message_type" in data:
             if data["message_type"] == "group":
                 executor.submit(group_message_handler, data["message"], data["group_id"], data["sender"]["nickname"], data["user_id"])
@@ -706,8 +703,6 @@ async def handler(websocket):
     global_websocket = websocket
     async for message in websocket:
         data = json.loads(message)
-        if DEBUG:
-            print(data)
         if "message_type" in data:
             if data["message_type"] == "group":
                 if data["group_id"] not in groups:
@@ -740,13 +735,6 @@ def private_message_handler(messages, user_id):
     finally:
         loop.close()
 
-def console():
-    while True:
-        text = input()
-        try:
-            exec(text)
-        except Exception as e:
-            print(e)
 
 def start_server():
     event_loop = asyncio.new_event_loop()
@@ -756,8 +744,6 @@ def start_server():
     else:
         start_wss_server_task = websockets.serve(handler, "0.0.0.0", 8080)
     event_loop.run_until_complete(start_wss_server_task)
-    if DEBUG:
-        event_loop.run_in_executor(None, console)
     try:
         event_loop.run_forever()
     finally:

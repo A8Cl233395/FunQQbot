@@ -1,5 +1,5 @@
 from flask import Flask, send_from_directory, abort, request
-from settings import WORKING_DIR
+from settings import WORKING_DIR, PORT
 app = Flask(__name__)
 allowed = []
 
@@ -49,4 +49,4 @@ def ping():
     return "pong"
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=4856)
+    app.run(host="0.0.0.0", port=PORT)

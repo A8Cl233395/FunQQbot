@@ -1,4 +1,3 @@
-import re
 import requests
 import subprocess
 from bigmodel_apis import *
@@ -38,8 +37,8 @@ def get_bili_text(user_input):
                 break
         except:
             pass
-    requests.get("http://localhost:4856/sec_check?arg=file.mp3")
-    text = aliyun_stt(f"http://{BASE_URL}:4856/download_fucking_file?filename=file.mp3")
+    requests.get(f"http://localhost:{PORT}/sec_check?arg=file.mp3")
+    text = aliyun_stt(f"http://{BASE_URL}:{PORT}/download_fucking_file?filename=file.mp3")
     return {"status": 1, 'title': title, 'pic_url': pic_url, 'desc': desc, 'text': text, 'tag': tag}
 
 def formatted_bili_summary(command_content, model=DEFAULT_MODEL):
