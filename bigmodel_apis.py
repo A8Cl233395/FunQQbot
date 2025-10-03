@@ -7,13 +7,7 @@ import base64
 import requests
 from settings import *
 
-print("正在初始化OpenAI客户端...")
 oclients = {}
-for model, info in PREFIX_TO_ENDPOINT.items():
-    endpoint = info["url"]
-    api_key = info["key"]
-    if endpoint not in oclients:
-        oclients[endpoint] = OpenAI(api_key=api_key, base_url=endpoint)
 
 def get_oclient(model=DEFAULT_MODEL):
     BASE_URL = PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"]

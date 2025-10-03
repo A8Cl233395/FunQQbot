@@ -1,4 +1,5 @@
 from services import *
+import os
 
 class CodeExecutor:
     def __init__(self, model=DEFAULT_MODEL, messages=[], allow_tools=True):
@@ -364,6 +365,6 @@ class CodeExecutor:
     def host_file(self, filename):
         if os.path.exists(rf"{self.cwd}\{filename}"):
             requests.get(f"http://localhost:{PORT}/sec_check?arg={filename}")
-            return f"http://{BASE_URL}:{PORT}/wf_file?filename={filename}"
+            return f"http://{BASE_URL}/wf_file?filename={filename}"
         else:
             return "找不到文件"

@@ -1,10 +1,10 @@
 from services import db, fetch_db
-from settings import SELF_ID_INT
+from settings import SELF_ID
 import requests, os
 def get_friend_list():
     result = requests.post("http://127.0.0.1:3001/get_friend_list").json()
     friends = [i["user_id"] for i in result["data"]]
-    friends.remove(SELF_ID_INT)
+    friends.remove(SELF_ID)
     return friends
 
 def get_group_list():
@@ -28,7 +28,7 @@ for i in bsettings_owners:
             db("DELETE FROM rsettings WHERE owner = ?", (i,))
             db("DELETE FROM csettings WHERE owner = ?", (i,))
 
-def delete_all_files_in_folder(folder_path, ignores):
+def delete_all_files_in_folder(folder_path, ignores=[]):
     files = [os.path.join(folder_path, f) for f in os.listdir(folder_path)]
     for file_path in files:
         if os.path.basename(file_path) not in ignores:

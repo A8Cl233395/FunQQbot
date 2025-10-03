@@ -2,7 +2,7 @@ import sqlite3
 import os
 # 检查是否存在数据库文件
 if os.path.exists("database.db"):
-    if input("数据库已存在，是否覆盖？(y/n)").lower() == "y":
+    if input("数据库已存在，是否覆盖？(y/N)").lower() == "y":
         os.remove("database.db")
         print("成功删除")
     else:

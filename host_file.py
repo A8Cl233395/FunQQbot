@@ -1,7 +1,10 @@
 from flask import Flask, send_from_directory, abort, request
-from settings import WORKING_DIR, PORT
+from settings import PORT
+import os
 app = Flask(__name__)
 allowed = []
+
+WORKING_DIR = os.getcwd()
 
 @app.route('/download_fucking_file')
 def download_file():

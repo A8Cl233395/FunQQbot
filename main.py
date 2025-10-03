@@ -43,7 +43,7 @@ def messages_to_text(data):
                     pos = message["data"]["path"]
                     silk_to_wav(pos, "./files/file.wav")
                     requests.get(f"http://localhost:{PORT}/sec_check?arg=file.wav")
-                    text = aliyun_stt(f"http://{BASE_URL}:{PORT}/download_fucking_file?filename=file.wav")
+                    text = aliyun_stt(f"http://{BASE_URL}/download_fucking_file?filename=file.wav")
                     output_text += f" {text}"
                 else:
                     output_text += " <语音>"
@@ -76,7 +76,7 @@ def messages_to_text(data):
                 print("发生错误")
                 print(message)
                 print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-    return username + ": " + output_text.strip(), output_text[1:], is_mentioned
+    return username + ": " + output_text.strip(), output_text.strip(), is_mentioned
 
 def ai_reply(messages, model, prompt):
     """
@@ -398,7 +398,7 @@ class Handle_private_message:
         db("INSERT INTO csettings (owner, tools) VALUES (?, ?)", (f"p{self.user_id}", True))
         db("INSERT INTO rsettings (owner, range1, range2) VALUES (?, ?, ?)", (f"p{self.user_id}", 1, 100))
         self.model = DEFAULT_MODEL
-        self.prompt = DEFAULT_PROMPT
+        self.prompt = DEFAULT_PROMPT_PERSONAL
     
     async def process(self, messages):
         text = process_first_message_text(messages)
@@ -553,7 +553,7 @@ class Handle_private_message:
                         pos = message["data"]["path"]
                         silk_to_wav(pos, "./files/file.wav")
                         requests.get(f"http://localhost:{PORT}/sec_check?arg=file.wav")
-                        text = aliyun_stt(f"http://{BASE_URL}:{PORT}/download_fucking_file?filename=file.wav")
+                        text = aliyun_stt(f"http://{BASE_URL}/download_fucking_file?filename=file.wav")
                         self.chat_instance.add({"type": "text", "text": text})
                     else:
                         self.chat_instance.add({"type": "text", "text": "<语音>"})
@@ -736,22 +736,41 @@ def private_message_handler(messages, user_id):
         loop.close()
 
 
-def start_server():
-    event_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(event_loop)
-    if MULTITHREAD:
-        start_wss_server_task = websockets.serve(handler_multithread, "0.0.0.0", 8080)
-    else:
-        start_wss_server_task = websockets.serve(handler, "0.0.0.0", 8080)
-    event_loop.run_until_complete(start_wss_server_task)
+async def main():
+    print("正在启动WebSocket服务器...")
+    
+    # 根据 MULTITHREAD 标志选择正确的处理器
+    handler_func = handler_multithread if MULTITHREAD else handler
+    
+    # websockets.serve 是一个异步函数，需要使用 await 来调用
+    # 它会返回一个 Server 对象
+    server = await websockets.serve(handler_func, "0.0.0.0", 8080)
+    print("WebSocket服务器已在 ws://0.0.0.0:8080 启动，等待连接...")
+
     try:
-        event_loop.run_forever()
+        # 使用 await asyncio.Future() 来让服务器永久运行，直到被中断
+        await asyncio.Future()  
     finally:
+        # 在程序结束时（例如按下 Ctrl+C），清理资源
+        print("\n正在关闭服务器...")
+        server.close()
+        await server.wait_closed()
         if MULTITHREAD:
             executor.shutdown()
-        event_loop.close()
+        print("服务器已关闭。")
 
 if __name__ == "__main__":
-    print("正在启动WebSocket服务器...")
-    # subprocess.Popen("python host_file.py")
-    start_server()
+    # 这部分初始化代码保持不变
+    for model, info in PREFIX_TO_ENDPOINT.items():
+        endpoint = info["url"]
+        api_key = info["key"]
+        if endpoint not in oclients:
+            oclients[endpoint] = OpenAI(api_key=api_key, base_url=endpoint)
+
+    # 使用 asyncio.run() 来启动主异步函数
+    # 它会自动处理事件循环的创建、运行和关闭
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # 优雅地处理用户手动中断 (Ctrl+C)
+        print("检测到手动中断，程序退出。")
