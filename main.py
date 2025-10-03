@@ -49,7 +49,7 @@ def messages_to_text(data):
                     output_text += " <语音>"
             case "at":
                 qq_id = message["data"]["qq"]
-                if qq_id == SELF_ID:
+                if qq_id == SELF_ID_STR:
                     is_mentioned = True
                 if qq_id in username_cache:
                     name = username_cache[qq_id]
@@ -173,6 +173,7 @@ class Handle_group_message:
                 self.last_time = time.time()  # 重置最后聊天时间
 
     async def process(self, messages):
+        sender_id = messages["sender"]["user_id"]
         message_send = []
         self.original_messages.extend(messages["message"]) # 记录原始消息
         if len(self.original_messages) > 10: # 缓存消息数量限制（原始）
@@ -215,7 +216,7 @@ class Handle_group_message:
                 command_type = plain_text_slices[0] + " "
             if command_type in self.mappings: # 检查指令是否存在
                 command_content = text[len(command_type):]
-                result = self.mappings[command_type](command_content)
+                result = self.mappings[command_type](command_content, sender_id)
                 message_send.extend(result)
         for i in message_send:
             self.stored_messages.append(f"{SELF_NAME}: {i}")
@@ -760,7 +761,7 @@ async def main():
         print("服务器已关闭。")
 
 if __name__ == "__main__":
-    # 这部分初始化代码保持不变
+    print("正在初始化OpenAI客户端...")
     for model, info in PREFIX_TO_ENDPOINT.items():
         endpoint = info["url"]
         api_key = info["key"]

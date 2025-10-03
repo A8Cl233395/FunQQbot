@@ -186,7 +186,7 @@ def get_page_text(url: str, timeout: int = 10) -> str:
             driver.get(url)
         except TimeoutException:
             # 当超时发生时，打印一条警告，然后继续执行
-            print(f"警告: 页面 {url} 加载超时。将尝试返回已加载的部分内容。")
+            # print(f"警告: 页面 {url} 加载超时。将尝试返回已加载的部分内容。")
             # (推荐) 发送JS命令停止浏览器进一步加载
             driver.execute_script("window.stop();")
             
@@ -226,7 +226,7 @@ def get_page_html(url: str, timeout: int = 10) -> str:
         try:
             driver.get(url)
         except TimeoutException:
-            print(f"警告: 页面 {url} 加载超时。将尝试返回已加载的部分内容。")
+            # print(f"警告: 页面 {url} 加载超时。将尝试返回已加载的部分内容。")
             driver.execute_script("window.stop();")
             
         # 无论是否超时，都直接返回当前浏览器的page_source

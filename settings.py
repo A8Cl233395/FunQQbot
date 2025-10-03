@@ -14,7 +14,8 @@ AMAP_KEY: str = settings["AMAP_KEY"]
 
 VIDEO_SUMMARY_PROMPT: str = settings["VIDEO_SUMMARY_PROMPT"]
 
-SELF_ID: str = str(settings["SELF_ID"])
+SELF_ID: int = settings["SELF_ID"]
+SELF_ID_STR: str = str(SELF_ID)
 SELF_NAME: str = settings["SELF_NAME"]
 
 DEFAULT_PROMPT: str = settings["DEFAULT_PROMPT"]
