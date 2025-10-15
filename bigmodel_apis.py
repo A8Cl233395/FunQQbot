@@ -119,10 +119,7 @@ def ocr(url: str) -> str:
     json_data = json.dumps({
         "base64": img_base64,
         "options": {
-            "ocr.language": "简体中文",
-            "ocr.angle": True,
             "ocr.maxSideLen": 99999,
-            "tbpu.parser": "multi_line",
             "data.format": "text",
         }
     })

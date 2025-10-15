@@ -297,7 +297,7 @@ class CodeExecutor:
                     keyword = function_json["keyword"]
                     if re.match(r"[-A-Za-z0-9+&@#/%?=~_|!:,.;]+[-A-Za-z0-9+&@#/%=~_|]", keyword):
                         try:
-                            result = self.get_page_text_with_parser(keyword)
+                            result = get_page_text_with_parser(keyword)
                         except:
                             result = self.web_search(keyword)
                     else:
@@ -314,7 +314,7 @@ class CodeExecutor:
                 if autorun:
                     try:
                         number = int(function_json["content"])
-                        response_content = self.spider.get_page_with_id(number)
+                        response_content = self.spider.get_page_content_with_id(number)
                     except NameError:
                         return {"ready": True, "content": "还没有搜索！"}
                     except IndexError:
@@ -355,7 +355,7 @@ class CodeExecutor:
 
     def run_code(self, code):
         try:
-            result = subprocess.run(["python", "-c", code], timeout=20, check=True, text=True, capture_output=True, cwd=self.cwd)
+            result = subprocess.run(["python", "-X", "utf8", "-c", code], timeout=20, check=True, text=True, capture_output=True, cwd=self.cwd, encoding="utf-8")
             return result.stdout
         except subprocess.TimeoutExpired as e:
             return f"任务已超时。\n已输出内容:\n{e.output.decode('utf-8') if e.output else b''}"

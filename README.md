@@ -74,6 +74,16 @@
 .addon
 ```
 
+## 更新器使用指南
+
+项目包含自动更新器，确保您始终使用最新版本：
+1. 运行`update.py`脚本。
+2. 更新器会自动检查GitHub上的最新版本。
+3. 如果有更新，更新器会下载并替换相关文件。
+4. 更新完成后，重新启动机器人即可。
+
+> 提示：请确保您的网络连接正常，并安装了`git`工具。
+
 ## 插件系统
 
 支持通过Python脚本扩展功能：
@@ -90,17 +100,14 @@ def plugin_main(data, messages, group_id):
 ```
 > [详细示例](/plugin-template.py)
 
-## 贡献指南
-
-欢迎提交Pull Request！请遵循以下规范：
-1. 新功能开发创建feature分支
-2. Bug修复创建fix分支
-3. 提交前运行代码检查
-4. 更新相关文档
-
 ## 开源协议
 
 本项目采用 [CC-BY-SA-4.0](LICENSE)
+
+### 使用的开源项目及协议
+
+- [geckodriver](https://github.com/mozilla/geckodriver) - 用于驱动Firefox浏览器，协议：[MPL-2.0](/assets/MPL-2.0)
+- [silk-v3-decoder](https://github.com/kn007/silk-v3-decoder) - 用于语音解码，协议：[MIT](/assets/MIT)
 
 ---
 

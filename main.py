@@ -564,6 +564,12 @@ class Handle_private_message:
                     self.chat_instance.add({"type": "text", "text": f"<回复: {text}>"})
                 case "face":
                     self.chat_instance.add({"type": "text", "text": "<表情>"})
+                case "forward":
+                    foward_messages = message["data"]["content"]
+                    text = ""
+                    for i in foward_messages:
+                        text += messages_to_text(i)[0] + "\n"
+                    self.chat_instance.add({"type": "text", "text": f"<合并转发内容: {text}>"})
                 case _:
                     self.chat_instance.add({"type": "text", "text": "<未知>"})
         if contains_text:
@@ -590,16 +596,10 @@ def send_private_message_http(user_id, message):
     else:
         requests.post("http://127.0.0.1:3001/send_private_msg", json={"user_id": user_id, "message": f"{message}"})
 
-def get_username(id, times = 0):
-    try:
-        result = requests.post("http://127.0.0.1:3001/get_stranger_info", json={"user_id": id}).json()
-        data = result["data"]["nick"]
-        return data
-    except Exception as e:
-        if times < 2:
-            return get_username(id, times + 1)
-        else:
-            raise e
+def get_username(id):
+    result = requests.post("http://127.0.0.1:3001/get_stranger_info", json={"user_id": id}).json()
+    data = result["data"]["nick"]
+    return data
 
 def draw_tarot_cards(spread_type = 'three_card', custom_draw = None):
     # 塔罗牌生成器
