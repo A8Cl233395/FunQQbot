@@ -153,7 +153,7 @@ def get_netease_music_details_text(song_id, comment_limit=5):
     combined += f"热评:\n```\n{comments_text}\n```"
     return combined
 
-def get_weather(adcode = "310110"):
+def get_weather(adcode=WEATHER_ADCODE):
     result = requests.get(f"https://restapi.amap.com/v3/weather/weatherInfo?key={AMAP_KEY}&city={adcode}&extensions=base").json()
     return {"time": time.time(), "weather": result["lives"][0]["weather"], "temperature": result["lives"][0]["temperature"], "humidity": result["lives"][0]["humidity"], "windpower": result["lives"][0]["windpower"]}
 
@@ -169,7 +169,7 @@ def get_page_text_with_parser(url):
     domain = re.search(domain_regex, url).group(1)
     try:
         match domain:
-            case "music.163.com":
+            case "music.163.com" | "163cn.tv":
                 song_id = re.search(r"id=(\d+)", url).group(1)
                 return get_netease_music_details_text(song_id)
             case "b23.tv" | "bilibili.com" | "www.bilibili.com":

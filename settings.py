@@ -26,6 +26,7 @@ PORT: str = str(settings["PORT"])
 FFMPEG_PATH: str = settings["FFMPEG_PATH"]
 DEFAULT_MODEL: str = settings["DEFAULT_MODEL"]
 DEFAULT_DRAWING_MODEL: str = settings["DEFAULT_DRAWING_MODEL"]
+WEATHER_ADCODE: str = str(settings["WEATHER_ADCODE"])
 
 DISABLED_FUNCTIONS: list = settings["DISABLED_FUNCTIONS"]
 MULTITHREAD: bool = settings["MULTITHREAD"]

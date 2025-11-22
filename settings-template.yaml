@@ -131,6 +131,7 @@ PORT: 4856 # 服务器端口
 FFMPEG_PATH: ffmpeg # ffmpeg可执行文件路径，如果ffmpeg在系统环境变量中可以设置为"ffmpeg"，否则需要设置为ffmpeg的绝对路径
 DEFAULT_MODEL: deepseek-chat # 默认模型
 DEFAULT_DRAWING_MODEL: flux-merged # 默认绘图模型，仅支持阿里云百炼
+WEATHER_ADCODE: 110000 # 默认天气查询城市adcode
 
 # 功能开关
 DISABLED_FUNCTIONS:

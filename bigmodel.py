@@ -60,7 +60,7 @@ class CodeExecutor:
                 "type": "function",
                 "function": {
                     "name": "visit",
-                    "description": "直接访问链接或使用序号访问搜索结果，返回网页中解析后的文字",
+                    "description": "直接访问链接或使用序号访问搜索结果，返回动态网页中的文字。对网易云音乐和哔哩哔哩有特殊解析。",
                     "parameters": {
                         "type": "object",
                         "properties": {

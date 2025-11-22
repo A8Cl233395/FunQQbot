@@ -524,7 +524,7 @@ class Handle_private_message:
                     self.chat_instance.add({"type": "text", "text": message["data"]["text"]})
                 case "image":
                     if MODEL_DESCRIPTIONS[self.model.split(";")[0]]["vision"]:
-                        self.chat_instance.add({"type": "image_url","image_url": {"url": message["data"]["url"].replace("https", "http")}})
+                        self.chat_instance.add({"type": "image_url","image_url": {"url": f"data:image/jpeg;base64,{url_to_b64(message['data']['url'].replace('https', 'http'))}"}})
                     elif OCR:
                         image_text = ocr(message["data"]["url"].replace("https", "http"))
                         self.chat_instance.add({"type": "text", "text": f"<图片文字: {image_text}>"})
@@ -532,15 +532,7 @@ class Handle_private_message:
                         self.chat_instance.add({"type": "text", "text": f"<图片>"})
                 case "json":
                     text = json.loads(message["data"]["data"])
-                    match text["app"]:
-                        case "com.tencent.music.lua":
-                            try:
-                                music_id = re.search(r'id=(\d+)', text["meta"]["music"]["musicUrl"]).group(1)
-                                self.chat_instance.add({"type": "text", "text": f"<音乐: {get_netease_music_details_text(music_id)}>"})
-                            except:
-                                self.chat_instance.add({"type": "text", "text": f"<卡片: {text['prompt']}>"})
-                        case _:
-                            self.chat_instance.add({"type": "text", "text": f"<卡片: {text['prompt']}>"})
+                    self.chat_instance.add({"type": "text", "text": f"<卡片: {text['prompt']}>"})
                 case "file":
                     response = requests.post("http://127.0.0.1:3001/get_file", json={"file_id": message["data"]["file_id"]}).json()
                     copy(response["data"]["file"], rf"./temp/{response['data']['file_name']}")
