@@ -40,7 +40,7 @@ class LRUCache:
 # 全局缓存变量
 oclients = {}
 b64_cache = LRUCache()
-ocr_cahce = LRUCache()
+ocr_cache = LRUCache()
 
 def get_oclient(model=DEFAULT_MODEL) -> OpenAI:
     BASE_URL = PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"]
@@ -121,13 +121,14 @@ def get_aliyun_stt_result_loop(task_id):
             raise Exception(result["results"][0]["message"])
 
 
-def url_to_b64(url) -> str:
+def url_to_b64(url, cache=True) -> str:
     global b64_cache
     if b64_cache.get(url):
         return b64_cache.get(url)
     response = requests.get(url)
     img_base64 = base64.b64encode(response.content).decode('utf-8')
-    b64_cache.put(url, img_base64)
+    if cache:
+        b64_cache.put(url, img_base64)
     return img_base64
 
 def ocr(url: str) -> str:

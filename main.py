@@ -215,7 +215,7 @@ class Handle_group_message:
             else:
                 command_type = plain_text_slices[0] + " "
             if command_type in self.mappings: # 检查指令是否存在
-                command_content = text[len(command_type):]
+                command_content = plain_text[len(command_type):]
                 result = self.mappings[command_type](command_content, sender_id)
                 message_send.extend(result)
         for i in message_send:

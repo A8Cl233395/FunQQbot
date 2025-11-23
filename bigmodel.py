@@ -178,10 +178,12 @@ class CodeExecutor:
                                         "name": tool_call.function.name,
                                     },
                                     "type": "function",
-                                    "index": tool_call.index
                                 })
                             if tool_call.function.arguments:
-                                self.tool_calls[tool_call.index]["function"]["arguments"] += tool_call.function.arguments
+                                if tool_call.index:
+                                    self.tool_calls[tool_call.index]["function"]["arguments"] += tool_call.function.arguments
+                                else: # 兼容gemini
+                                    self.tool_calls[-1]["function"]["arguments"] += tool_call.function.arguments
                 if buffer:
                     yield buffer.strip()
                     buffer = ""
