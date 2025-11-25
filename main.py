@@ -5,7 +5,7 @@ from bigmodel import *
 from shutil import copy
 from hashlib import md5
 
-username_cache = {}
+username_cache = LRUCache(500, allow_reverse=True)
 groups = {}
 users = {}
 weather = {"time": 0}
@@ -15,7 +15,7 @@ def messages_to_text(data):
     is_mentioned = False
 
     username = data["sender"]["nickname"]
-    username_cache[data["sender"]["user_id"]] = username
+    username_cache.put(data["sender"]["user_id"], username)
     messages = data["message"]
     for message in messages:
         match message["type"]:
@@ -51,10 +51,7 @@ def messages_to_text(data):
                 qq_id = message["data"]["qq"]
                 if qq_id == SELF_ID_STR:
                     is_mentioned = True
-                if qq_id in username_cache:
-                    name = username_cache[qq_id]
-                else:
-                    name = username_cache[qq_id] = get_username(qq_id)
+                name = get_username(qq_id)
                 output_text += f"@{name}"
             case "reply":
                 reply_data = get_message(message["data"]["id"])
@@ -76,7 +73,8 @@ def messages_to_text(data):
                 print("发生错误")
                 print(message)
                 print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-    return username + ": " + output_text.strip(), output_text.strip(), is_mentioned
+    output_text = output_text.strip()
+    return username + ": " + output_text, output_text, is_mentioned
 
 def ai_reply(messages, model, prompt):
     """
@@ -95,14 +93,29 @@ def ai_reply(messages, model, prompt):
     
     # 调用大模型
     result = ask_ai(prompt, combined_text, model=model)
-    splited = result.splitlines()
-    for i in range(len(splited)):
-        real_text = splited[i]
-        if real_text[:len(SELF_NAME)+1] == f"{SELF_NAME}：": # 处理多出来的名字
-            splited[i] = real_text[len(SELF_NAME)+1:]
-        elif real_text[:len(SELF_NAME)+2] == f"{SELF_NAME}: ":
-            splited[i] = real_text[len(SELF_NAME)+2:]
-        splited[i] = splited[i].strip()
+    splited = []
+    for line in result.splitlines():
+        if line.startswith(f"{SELF_NAME}："):
+            line = line[len(SELF_NAME) + 1:]
+        elif line.startswith(f"{SELF_NAME}: "):
+            line = line[len(SELF_NAME) + 2:]
+        splited.append(line.strip())
+    
+    def replace_at_with_cq_code(match):
+        username = match.group(1)
+        id = username_cache.find_key(username)
+        if id:
+            return f"[CQ:at,qq={id}]"
+        else:
+            raise ValueError()
+    
+    for index, i in enumerate(splited):
+        try:
+            to_user = re.sub(r'@([^\s]+)', replace_at_with_cq_code, i)
+            splited[index] = {"to_bot": i, "to_user": to_user}
+        except ValueError:
+            pass
+    
     return splited
 
 def process_first_message_text(data):
@@ -219,8 +232,13 @@ class Handle_group_message:
                 result = self.mappings[command_type](command_content, sender_id)
                 message_send.extend(result)
         for i in message_send:
-            self.stored_messages.append(f"{SELF_NAME}: {i}")
-            await send_group_message(self.group_id, i)
+            if type(i) == dict:
+                to_bot = i["to_bot"]
+                to_user = i["to_user"]
+            else:
+                to_bot = to_user = i
+            self.stored_messages.append(f"{SELF_NAME}: {to_bot}")
+            await send_group_message(self.group_id, to_user)
             await asyncio.sleep(0.1)
         
     def ping(self):
@@ -290,8 +308,8 @@ class Handle_group_message:
 诗: {get_poem()}
 一言: {get_tip()}'''
         result = ask_ai(LUCK_SYSTEM_PROMPT, content, model=self.model)
-        result = f"[CQ:at,qq={sender_id}] 你的每日运势出来了💥\n" + result
-        return [result]
+        result = f" 你的每日运势出来了💥\n" + result
+        return {"to_user": f"[CQ:at,qq={sender_id}]" + result, "to_bot": f"{get_username(sender_id)}: " + result}
 
     def help(self):
         return [USER_GUIDE_URL, "请复制到浏览器打开，时间可能较长"]
@@ -309,7 +327,7 @@ class Handle_group_message:
 
     def draw(self, command_content):
         url = draw(command_content)
-        return [f"[CQ:image,file={url}]"]
+        return {"to_bot": f" ```图片内容\n{command_content}\n```", "to_user": f"[CQ:image,file={url}]"}
 
     def prompt_reset(self):
         db("UPDATE prompts SET prompt = ? WHERE owner = ?", (DEFAULT_PROMPT, f"g{self.group_id}"))
@@ -492,7 +510,7 @@ class Handle_private_message:
             is_tools_allowed = fetch_db("SELECT tools FROM csettings WHERE owner = ?", (f"p{self.user_id}",))[0][0]
             self.chat_instance = CodeExecutor(model=self.model, messages=[{"role": "system", "content": self.prompt}], allow_tools=is_tools_allowed)
             return ["聊天模式已开启"]
-    
+
     def draw(self, command_content):
         url = draw(command_content)
         return [f"[CQ:image,file={url}]"]
@@ -568,7 +586,7 @@ class Handle_private_message:
             for response in self.chat_instance.process():
                 send_private_message_http(self.user_id, response)
 
-async def send_private_message(user_id, message, method="websocket"):
+async def send_private_message(user_id, message):
     # 别删!!!
     if f"{message}" == "":
         pass
@@ -589,8 +607,14 @@ def send_private_message_http(user_id, message):
         requests.post("http://127.0.0.1:3001/send_private_msg", json={"user_id": user_id, "message": f"{message}"})
 
 def get_username(id):
-    result = requests.post("http://127.0.0.1:3001/get_stranger_info", json={"user_id": id}).json()
-    data = result["data"]["nick"]
+    if username_cache.get(id):
+        return username_cache.get(id)
+    try:
+        result = requests.post("http://127.0.0.1:3001/get_stranger_info", json={"user_id": id}).json()
+        data = result["data"]["nick"]
+    except:
+        data = "QQ用户"
+    username_cache.put(id, data)
     return data
 
 def draw_tarot_cards(spread_type = 'three_card', custom_draw = None):

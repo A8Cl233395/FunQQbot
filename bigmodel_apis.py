@@ -7,35 +7,64 @@ from settings import *
 from collections import OrderedDict
 
 class LRUCache:
-    def __init__(self, capacity=50):
-        self.cache = OrderedDict()
+    def __init__(self, capacity=50, allow_reverse=False):
         self.capacity = capacity
+        self.cache = OrderedDict()
+        self.allow_reverse = allow_reverse
+        # 只有开启反向查询时才初始化字典，节省空间
+        self.rev_cache = {} if allow_reverse else None
     
     def get(self, key):
         if key not in self.cache:
             return None
-        # 移动到最新位置
+        
+        # 移动到最新位置 (MRU)
         self.cache.move_to_end(key)
-        return self.cache[key]
+        val = self.cache[key]
+        
+        # 如果支持反向查询，既然这个key刚被访问过，它就是这个值对应的“最新”键
+        if self.allow_reverse:
+            self.rev_cache[val] = key
+            
+        return val
     
     def put(self, key, value):
         if key in self.cache:
-            # 如果key已存在，移动到最新位置
+            # key 已存在：移动到最新位置
             self.cache.move_to_end(key)
+            
+            # 处理反向索引更新
+            if self.allow_reverse:
+                old_val = self.cache[key]
+                # 如果值发生了变化，且旧值的反向索引指向当前key，则删除旧索引
+                if old_val != value and self.rev_cache.get(old_val) == key:
+                    del self.rev_cache[old_val]
         else:
-            # 如果超过容量，删除最旧的项
+            # key 不存在：检查容量
             if len(self.cache) >= self.capacity:
-                self.cache.popitem(last=False)
+                # 弹出最旧项 (FIFO)
+                old_k, old_v = self.cache.popitem(last=False)
+                
+                # 如果被删除的键是其值的反向索引代表，则清理反向索引
+                # 注意：如果 rev_cache[old_v] 指向的是别的（更新的）key，则不删除
+                if self.allow_reverse and self.rev_cache.get(old_v) == old_k:
+                    del self.rev_cache[old_v]
+        
+        # 更新主缓存
         self.cache[key] = value
-    
-    def __contains__(self, key):
-        return key in self.cache
-    
-    def __getitem__(self, key):
-        return self.get(key)
-    
-    def __setitem__(self, key, value):
-        self.put(key, value)
+        
+        # 更新反向索引：无论 value 是否重复，当前 key 都是该 value 的“最新”代表
+        if self.allow_reverse:
+            self.rev_cache[value] = key
+            
+    def find_key(self, value):
+        """
+        通过值反向查询键。
+        如果多个键对应同一个值，返回最新的（最后被 put 或 get 的）那个键。
+        """
+        if not self.allow_reverse:
+            return None
+        return self.rev_cache.get(value)
 
 # 全局缓存变量
 oclients = {}
@@ -122,7 +151,6 @@ def get_aliyun_stt_result_loop(task_id):
 
 
 def url_to_b64(url, cache=True) -> str:
-    global b64_cache
     if b64_cache.get(url):
         return b64_cache.get(url)
     response = requests.get(url)
@@ -132,10 +160,9 @@ def url_to_b64(url, cache=True) -> str:
     return img_base64
 
 def ocr(url: str) -> str:
-    global ocr_cache
     if ocr_cache.get(url):
         return ocr_cache.get(url)
-    img_base64 = url_to_b64(url, cache=False)
+    img_base64 = url_to_b64(url)
     json_data = json.dumps({
         "base64": img_base64,
         "options": {
