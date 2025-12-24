@@ -2,8 +2,7 @@ import json
 from openai import OpenAI
 from spider import *
 import base64
-import requests
-from settings import *
+from base_settings import *
 from collections import OrderedDict
 
 class LRUCache:
@@ -67,15 +66,15 @@ class LRUCache:
         return self.rev_cache.get(value)
 
 # 全局缓存变量
-oclients = {}
+oclients: dict[str, OpenAI] = {}
 b64_cache = LRUCache()
 ocr_cache = LRUCache()
 
-def get_oclient(model=DEFAULT_MODEL) -> OpenAI:
-    BASE_URL = PREFIX_TO_ENDPOINT[model.split("-")[0]]["url"]
-    return oclients[BASE_URL]
+def get_oclient(model: str) -> OpenAI:
+    endpoint = MODELS[model]["endpoint"]
+    return oclients[endpoint]
 
-def ask_ai(prompt, content, model=DEFAULT_MODEL, temperature=TEMPERATURE):
+def ask_ai(prompt, content, model=DEFAULT_MODEL, temperature=TEMPERATURE, json_only=False):
     oclient = get_oclient(model)
     if prompt:
         messages = [{"role": "system", "content": prompt}, {"role": "user", "content": content}]
@@ -87,32 +86,8 @@ def ask_ai(prompt, content, model=DEFAULT_MODEL, temperature=TEMPERATURE):
         "stream": False,
         "temperature": temperature,
     }
-    model_infos = model.split(";")
-    if len(model_infos) == 2:
-        if model_infos[1] == "nonthinking":
-            params["extra_body"] = {"enable_thinking": False}
-        elif model_infos[1] == "thinking":
-            params["extra_body"] = {"enable_thinking": True}
-        params["model"] = model_infos[0]
-
-    response = oclient.chat.completions.create(**params)
-    return response.choices[0].message.content
-
-def ai(messages, model=DEFAULT_MODEL, temperature=TEMPERATURE):
-    oclient = get_oclient(model)
-    params = {
-        "model": model,
-        "messages": messages,
-        "stream": False,
-        "temperature": temperature,
-    }
-    model_infos = model.split(";")
-    if len(model_infos) == 2:
-        if model_infos[1] == "nonthinking":
-            params["extra_body"] = {"enable_thinking": False}
-        elif model_infos[1] == "thinking":
-            params["extra_body"] = {"enable_thinking": True}
-        params["model"] = model_infos[0]
+    if json_only:
+        params["response_format"] = {"type": "json_object"}
 
     response = oclient.chat.completions.create(**params)
     return response.choices[0].message.content
@@ -173,30 +148,3 @@ def ocr(url: str) -> str:
     result = requests.post('http://127.0.0.1:1224/api/ocr', headers={"Content-Type": "application/json"}, data=json_data).json()["data"]
     ocr_cache.put(url, result)
     return result
-
-def draw(prompt, model=DEFAULT_DRAWING_MODEL, size="1024x1024"):
-    '''返回图像链接'''
-    return aliyun_draw(prompt, model, size)
-
-# CNM阿里云为什么不支持openai格式
-def aliyun_draw(prompt, model=DEFAULT_DRAWING_MODEL, size="1024*1024"):
-    size = size.replace("x", "*")
-    url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
-    headers = {"Content-Type": "application/json","Authorization": f"Bearer {ALIYUN_KEY}", "X-DashScope-Async": "enable"}
-    data = {"model": model,"input": {"prompt": prompt}, "parameters": {"size": size, "add_sampling_metadata": False}}
-    response = requests.post(url, headers=headers, data=json.dumps(data)).json()
-    task_id = response["output"]["task_id"]
-    return get_aliyun_draw_result_loop(task_id)
-
-def get_aliyun_draw_result_loop(task_id):
-    '''阿里云画图模型结果获取'''
-    url = f"https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}"
-    headers = {"Authorization": ALIYUN_KEY}
-    while True:
-        result = requests.get(url, headers=headers).json()
-        if result["output"]["task_status"] == "SUCCEEDED":
-            return result["output"]["results"][0]["url"]
-        elif result["output"]["task_status"] in ["RUNNING", "PENDING"]:
-            time.sleep(1)
-        else:
-            raise Exception(result["output"]["message"])

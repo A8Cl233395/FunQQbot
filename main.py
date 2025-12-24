@@ -1,31 +1,33 @@
 import asyncio
 import websockets
-import random
+import importlib
+from types import ModuleType
 from bigmodel import *
-from shutil import copy
-from hashlib import md5
 
 username_cache = LRUCache(500, allow_reverse=True)
 groups = {}
 users = {}
 weather = {"time": 0}
 
-def messages_to_text(data):
+def messages_to_text(data, self_name=DEFAULT_NAME) -> tuple[str, str, bool]:
     output_text = ""
     is_mentioned = False
 
-    username = data["sender"]["nickname"]
+    if data["sender"]:
+        username = data["sender"]["nickname"]
+    else:
+        username = "QQ用户"
     username_cache.put(data["sender"]["user_id"], username)
     messages = data["message"]
     for message in messages:
         match message["type"]:
             case "text":
                 message_text = message["data"]["text"]
-                if f"@{SELF_NAME}" in message_text:
+                if f"@{self_name}" in message_text:
                     is_mentioned = True
                 output_text += f" {message_text}"
             case "image":
-                if OCR:
+                if ENABLE_OCR:
                     image_text = ocr(message["data"]["url"].replace("https", "http"))
                     output_text += f" ```图片OCR结果\n{image_text}\n``` "
                 else:
@@ -38,7 +40,7 @@ def messages_to_text(data):
             case "video":
                 output_text += " <视频>"
             case "record":
-                if STT:
+                if ENABLE_STT:
                     time.sleep(1)
                     pos = message["data"]["path"]
                     silk_to_wav(pos, "./files/file.wav")
@@ -51,11 +53,19 @@ def messages_to_text(data):
                 qq_id = message["data"]["qq"]
                 if qq_id == SELF_ID_STR:
                     is_mentioned = True
-                name = get_username(qq_id)
+                    name = self_name
+                elif qq_id == "all":
+                    is_mentioned = True
+                    name = "全体成员"
+                else:
+                    name = get_username(qq_id)
                 output_text += f"@{name}"
             case "reply":
                 reply_data = get_message(message["data"]["id"])
-                reply = messages_to_text(reply_data)[0]
+                if reply_data:
+                    reply = messages_to_text(reply_data, self_name=self_name)[0]
+                else:
+                    reply = "消息不存在"
                 marked_reply = "\n".join([f"> {i}" for i in reply.splitlines()])
                 output_text += marked_reply
             case "face":
@@ -64,7 +74,7 @@ def messages_to_text(data):
                 foward_messages = message["data"]["content"]
                 text = ""
                 for i in foward_messages:
-                    text += messages_to_text(i)[0] + "\n"
+                    text += messages_to_text(i, self_name=self_name)[0] + "\n"
                 output_text += f" ```合并转发内容\n{text}``` "
             case "markdown":
                 output_text += f" ```markdown\n{message['data']['content']}\n```"
@@ -75,48 +85,6 @@ def messages_to_text(data):
                 print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
     output_text = output_text.strip()
     return username + ": " + output_text, output_text, is_mentioned
-
-def ai_reply(messages, model, prompt):
-    """
-    调用AI模型生成回复
-
-    Args:
-        messages: 消息历史列表
-        model: 使用的模型名称
-        prompt: 提示词
-        
-    Returns:
-        回复消息列表
-    """
-    # 拼接所有消息
-    combined_text = "\n".join(messages) + f"{SELF_NAME}: "
-    
-    # 调用大模型
-    result = ask_ai(prompt, combined_text, model=model)
-    splited = []
-    for line in result.splitlines():
-        if line.startswith(f"{SELF_NAME}："):
-            line = line[len(SELF_NAME) + 1:]
-        elif line.startswith(f"{SELF_NAME}: "):
-            line = line[len(SELF_NAME) + 2:]
-        splited.append(line.strip())
-    
-    def replace_at_with_cq_code(match):
-        username = match.group(1)
-        id = username_cache.find_key(username)
-        if id:
-            return f"[CQ:at,qq={id}]"
-        else:
-            raise ValueError()
-    
-    for index, i in enumerate(splited):
-        try:
-            to_user = re.sub(r'@([^\s]+)', replace_at_with_cq_code, i)
-            splited[index] = {"to_bot": i, "to_user": to_user}
-        except ValueError:
-            pass
-    
-    return splited
 
 def process_first_message_text(data):
     """处理消息列表中的第一个消息文本内容"""
@@ -129,56 +97,82 @@ def process_first_message_text(data):
 class Handle_group_message:
     """群消息处理类"""
     def __init__(self, group_id):
+        print("新增群组: ", group_id)
         self.group_id = group_id
         self.stored_messages = []
         self.original_messages = []
-        self.prompt = fetch_db("SELECT prompt FROM prompts WHERE owner = ?", (f"g{group_id}",))
-        if self.prompt:
-            self.prompt= self.prompt[0][0]
-            self.model = fetch_db("SELECT model FROM bsettings WHERE owner = ?", (f"g{group_id}",))[0][0]
-        else:
-            self.init()
-        if ENABLE_PLUGIN:
-            plugin_test = fetch_db("SELECT code, data FROM plugins WHERE owner = ?", (f"g{group_id}",))
-            if plugin_test:
-                self.plugin = plugin_test[0][0]
-                self.plugin_data = eval(plugin_test[0][1])
-                self.plugin = compile(self.plugin, "<string>", "exec", optimize=2)
-            else:
-                self.plugin = None
-        else:
-            self.plugin = None
-        #a: command_content, b: sender_id
-        self.mappings = {
-            ".tar ": lambda a, b: self.tar(a),
-            ".luck": lambda a, b: self.luck(b),
-            ".help": lambda a, b: self.help(),
-            ".clear": lambda a, b: self.clear(),
-            ".prompt": lambda a, b: self.prompt_reset(a),
-            ".prompt ": lambda a, b: self.prompt_set(a),
-            ".random": lambda a, b: self.random_use(),
-            ".random ": lambda a, b: self.random_set(a),
-            ".model ": lambda a, b: self.set_model(a),
-            ".ping": lambda a, b: self.ping(),
-            ".draw ": lambda a, b: self.draw(a),
-            ".addon": lambda a, b: self.addon(),
-        }
-        for i in DISABLED_FUNCTIONS: # 禁用功能
-            if i in self.mappings:
-                self.mappings.pop(i)
+        self.config: dict = yaml.safe_load(open("configs/groups/default.yaml", encoding="utf-8"))
+        if os.path.exists(f"configs/groups/{self.group_id}.yaml"):
+            group_config = yaml.safe_load(open(f"configs/groups/{self.group_id}.yaml", encoding="utf-8"))
+            if group_config:
+                self.config.update(group_config)
+        self.prompt: str = self.config['PROMPT']
+        self.name: str = self.config["NAME"]
         self.last_time = time.time()
         self.delete = True # 阻止删除消息，使用大模型缓存
-        if IDLE_REPLY_TIME:
+        self.idle_reply_time: int = self.config["IDLE_REPLY_TIME"]
+        self.model: str = self.config["MODEL"]
+        self.max_history: int = self.config["MAX_HISTORY"]
+        self.temperature: int = self.config["TEMPERATURE"]
+        if self.idle_reply_time:
             self.idle_task = asyncio.create_task(self.check_idle())  # 添加定时器任务
         self.bot_sent = False
+        self.custom_module = self.load_custom_script()
+        if self.custom_module:
+            self.custom_module.hook_init(self)
+        del self.config
+
+    def load_custom_script(self) -> ModuleType | None:
+        """动态加载对应的群组脚本"""
+        script_path = f"configs/groups/{self.group_id}.py"
+        script_path = script_path if os.path.exists(script_path) else "configs/groups/default.py"
+        try:
+            spec = importlib.util.spec_from_file_location("custom_module", script_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            if not hasattr(module, "hook_init"):
+                print(f"[{self.group_id}] 自定义脚本缺少 hook_init 函数")
+            elif not hasattr(module, "hook_process"):
+                print(f"[{self.group_id}] 自定义脚本缺少 hook_process 函数")
+            else:
+                return module
+        except Exception as e:
+            print(f"[{self.group_id}] 自定义脚本加载失败: {e}")
+
+    def ai_reply(self):
+        # 拼接所有消息
+        combined_text = "\n".join(self.stored_messages)
+        # 调用大模型
+        result = ask_ai(self.prompt, combined_text, model=self.model, temperature=self.temperature)
+        splited = []
+        for line in result.splitlines():
+            if line.startswith(f"{self.name}："):
+                line = line[len(self.name) + 1:]
+            elif line.startswith(f"{self.name}: "):
+                line = line[len(self.name) + 2:]
+            splited.append(line.strip())
+        def replace_at_with_cq_code(match):
+            username = match.group(1)
+            id = username_cache.find_key(username)
+            if id:
+                return f"[CQ:at,qq={id}]"
+            else:
+                raise ValueError()
+        for index, i in enumerate(splited):
+            try:
+                to_user = re.sub(r'@([^\s]+)', replace_at_with_cq_code, i)
+                splited[index] = {"to_bot": i, "to_user": to_user}
+            except ValueError:
+                pass
+        return splited
 
     async def check_idle(self):
         """检查群是否长时间无人发消息"""
         while True:
             await asyncio.sleep(10)
-            if time.time() - self.last_time > IDLE_REPLY_TIME and not self.bot_sent:
-                for i in ai_reply(self.stored_messages, self.model, self.prompt):
-                    self.stored_messages.append(f"{SELF_NAME}: {i}")
+            if time.time() - self.last_time > self.idle_reply_time and not self.bot_sent:
+                for i in self.ai_reply():
+                    self.stored_messages.append(f"{self.name}: {i}")
                     await send_group_message(self.group_id, i)
                     await asyncio.sleep(0.1)
                 self.bot_sent = True
@@ -186,13 +180,13 @@ class Handle_group_message:
                 self.last_time = time.time()  # 重置最后聊天时间
 
     async def process(self, messages):
+        print(f"群 {self.group_id} 收到消息")
+        self.messages = messages
         sender_id = messages["sender"]["user_id"]
-        message_send = []
+        self.message_send = []
         self.original_messages.extend(messages["message"]) # 记录原始消息
-        if len(self.original_messages) > 10: # 缓存消息数量限制（原始）
-            self.original_messages = self.original_messages[-10:]
-        text, plain_text, is_mentioned = messages_to_text(messages)
-        self.stored_messages.append(text)
+        self.text, self.plain_text, self.is_mentioned = messages_to_text(messages, self_name=self.name)
+        self.stored_messages.append(self.text)
         time_to_last = time.time() - self.last_time
         if time_to_last > 3600: # 超过1小时清理
             self.delete = True
@@ -202,389 +196,73 @@ class Handle_group_message:
             self.stored_messages.append("<时间间隔长>")
         self.bot_sent = False
         self.last_time = time.time() # 更新最后聊天时间
-        if len(self.stored_messages) > MAX_HISTORY and self.delete: # 超过50条消息清理
-            self.stored_messages.pop(0)
-        # ! ! ! 插件加载位置 ! ! !
-        if self.plugin: # 执行插件
-            try:
-                plugin_data_hash = md5(repr(self.plugin_data).encode()).hexdigest()
-                exec(self.plugin)
-                if md5(repr(self.plugin_data).encode()).hexdigest() != plugin_data_hash:
-                    db("UPDATE plugins SET data = ? WHERE owner = ?", (repr(self.plugin_data), f"g{self.group_id}"))
-            except Exception as e:
-                message_send.append(f"插件执行失败，已在本次移除\n{e}")
-                self.plugin = None
-        # ! ! ! 插件加载位置 ! ! !
+        if self.delete: # 超过50条消息清理
+            self.stored_messages = self.stored_messages[-self.max_history:]
+        if self.custom_module:
+            self.custom_module.hook_process(self)
         # 被提及
-        if is_mentioned:
+        if self.is_mentioned:
             self.delete = False
-            result = ai_reply(self.stored_messages, self.model, self.prompt)
-            message_send.extend(result)
-        # 指令
-        if plain_text[:1] == ".":
-            plain_text_slices = plain_text.split()
-            if len(plain_text_slices) == 1:
-                command_type = plain_text_slices[0]
-            else:
-                command_type = plain_text_slices[0] + " "
-            if command_type in self.mappings: # 检查指令是否存在
-                command_content = plain_text[len(command_type):]
-                result = self.mappings[command_type](command_content, sender_id)
-                message_send.extend(result)
-        for i in message_send:
+            result = self.ai_reply()
+            self.message_send.extend(result)
+        for i in self.message_send:
             if type(i) == dict:
                 to_bot = i["to_bot"]
                 to_user = i["to_user"]
             else:
                 to_bot = to_user = i
-            self.stored_messages.append(f"{SELF_NAME}: {to_bot}")
+            self.stored_messages.append(f"{self.name}: {to_bot}")
             await send_group_message(self.group_id, to_user)
             await asyncio.sleep(0.1)
-        
-    def ping(self):
-        return ["Pong!"]
-
-    def addon(self): # 装载插件
-        if not ENABLE_PLUGIN:
-            return ["插件未启用"]
-        if self.original_messages[-2]["type"] != "file": #检查文件
-            self.plugin = None
-            del self.plugin_data
-            db("DELETE FROM plugins WHERE owner = ?", (f"g{self.group_id}",))
-            return ["已移除插件"]
-        if self.original_messages[-2]["data"]["file"][-3:] != ".py": #检查是否为.py文件
-            return ["请发送.py文件"]
-        pos = requests.post("http://127.0.0.1:3001/get_file", json={"file_id": self.original_messages[-2]["data"]["file_id"]}).json()["data"]["file"]
-        try:
-            with open(pos, "r", encoding="utf-8") as f:
-                code = f.read()
-            try:
-                init_setting = json.loads(code.split("\n")[0][1:])
-            except:
-                return ["插件格式错误，第一行应为JSON格式的初始化注释"]
-            if "init" not in init_setting:
-                return ["JSON格式错误，缺少init字段"]
-            if init_setting["init"]:
-                if "plugin_data" in init_setting:
-                    self.plugin_data = init_setting["plugin_data"]
-                else:
-                    self.plugin_data = None
-            if fetch_db("SELECT code FROM plugins WHERE owner = ?", (f"g{self.group_id}",)):
-                if init_setting["init"]:
-                    db("UPDATE plugins SET code = ?, data = ? WHERE owner = ?", (code, repr(self.plugin_data), f"g{self.group_id}"))
-                else:
-                    db("UPDATE plugins SET code = ? WHERE owner = ?", (code, f"g{self.group_id}"))
-            else:
-                if init_setting["init"]:
-                    db("INSERT INTO plugins (owner, code, data) VALUES (?, ?, ?)", (f"g{self.group_id}", code, repr(self.plugin_data)))
-                else:
-                    return ["插件格式错误，缺少初始化"]
-            self.plugin = compile(code, "<string>", "exec", optimize=2)
-            return ["插件上传成功"]
-        except UnicodeDecodeError:
-            return ["文件编码错误，请使用UTF-8编码"]
-        except SyntaxError as e:
-            return [f"语法错误: {e}"]
-        finally:
-            os.remove(pos)
-    
-    def tar(self, command_content):
-        cards = parse_to_narrative(draw_tarot_cards())
-        result = ask_ai(f"你是塔罗牌占卜师，这是你抽出的塔罗牌: \n{cards}", command_content, model=self.model)
-        return [cards + "\n---\n" + result]
-
-    def luck(self, sender_id):
-        global weather
-        current_time_int = time.time()
-        current_time_raw = time.localtime()
-        if current_time_int - weather["time"] > 3600:
-            weather = get_weather()
-        content = f'''现在时间{current_time_raw.tm_year}年{current_time_raw.tm_mon}月{current_time_raw.tm_mday}日{current_time_raw.tm_hour}时
-天气: {weather["weather"]}
-温度: {weather["temperature"]}
-湿度: {weather["humidity"]}
-风力: {weather["windpower"]}
-幸运值: {random.randint(1, 7)}/7
-诗: {get_poem()}
-一言: {get_tip()}'''
-        result = ask_ai(LUCK_SYSTEM_PROMPT, content, model=self.model)
-        result = f" 你的每日运势出来了💥\n" + result
-        return {"to_user": f"[CQ:at,qq={sender_id}]" + result, "to_bot": f"{get_username(sender_id)}: " + result}
-
-    def help(self):
-        return [USER_GUIDE_URL, "请复制到浏览器打开，时间可能较长"]
-
-    def clear(self):
-        self.stored_messages = []
-        return ["已清除聊天记录缓存"]
-
-    def init(self):
-        db("INSERT INTO bsettings (owner, model) VALUES (?, ?)", (f"g{self.group_id}", DEFAULT_MODEL))
-        db("INSERT INTO prompts (owner, prompt) VALUES (?, ?)", (f"g{self.group_id}", DEFAULT_PROMPT))
-        db("INSERT INTO rsettings (owner, range1, range2) VALUES (?, ?, ?)", (f"g{self.group_id}", 1, 100))
-        self.model = DEFAULT_MODEL
-        self.prompt = DEFAULT_PROMPT
-
-    def draw(self, command_content):
-        url = draw(command_content)
-        return {"to_bot": f" ```图片内容\n{command_content}\n```", "to_user": f"[CQ:image,file={url}]"}
-
-    def prompt_reset(self):
-        db("UPDATE prompts SET prompt = ? WHERE owner = ?", (DEFAULT_PROMPT, f"g{self.group_id}"))
-        self.prompt = DEFAULT_PROMPT
-        return ["设置成功，默认提示为：" + DEFAULT_PROMPT]
-
-    def prompt_set(self, command_content):
-        self.prompt = command_content
-        if self.prompt.lower() in ["empty", "none", "0", "null", "void"]:
-            self.prompt = ""
-        db("UPDATE prompts SET prompt = ? WHERE owner = ?", (self.prompt, f"g{self.group_id}"))
-        return ["设置成功"]
-
-    def random_use(self):
-        result = fetch_db("SELECT range1, range2 FROM rsettings WHERE owner = ?", (f"g{self.group_id}",))
-        range1 = result[0][0]
-        range2 = result[0][1]
-        return [f"{range1} - {range2}之间的随机数: {random.randint(range1, range2)}"]
-
-    def random_set(self, command_content):
-        text_split = command_content.split()
-        if len(text_split) == 2:
-            db("UPDATE rsettings SET range1 = ?, range2 = ? WHERE owner = ?", (text_split[0], text_split[1], f"g{self.group_id}"))
-            return ["设置成功"]
-        else:
-            return ["设置失败"]
-    
-    def set_model(self, command_content):
-        if command_content in ["ls", "list", "help"]:
-            temp = "模型列表: "
-            for name, info in MODEL_DESCRIPTIONS.items():
-                temp += f'''\n    {name}: {info["description"]}'''
-                if info["vision"]:
-                    temp += "（支持图片）"
-                if info["2in1"]:
-                    temp += "（支持切换思考模式）"
-            return [temp]
-        else:
-            model_infos = command_content.split(";")
-            if model_infos[0] in MODEL_DESCRIPTIONS:
-                if len(model_infos) == 2 and model_infos[1] in ["nonthinking", "thinking"] and MODEL_DESCRIPTIONS[model_infos[0]]["2in1"]:
-                    db("UPDATE bsettings SET model = ? WHERE owner = ?", (command_content, f"g{self.group_id}"))
-                    self.model = command_content
-                    return [f"设置成功，你选择的模型为{model_infos[0]}，使用{model_infos[1]}模式"]
-                elif len(model_infos) == 1:
-                    db("UPDATE bsettings SET model = ? WHERE owner = ?", (command_content, f"g{self.group_id}"))
-                    self.model = command_content
-                    return ["设置成功，你选择的模型为" + model_infos[0]]
-                else:
-                    return ["模式设置错误，请选择thinking或nonthinking"]
-            else:
-                return ["模型不存在，请使用.model list来查看模型列表"]
-
 
 class Handle_private_message:
-    """私聊消息处理类"""
     def __init__(self, user_id):
+        print("新增用户: ", user_id)
         self.user_id = user_id
-        self.model = fetch_db("SELECT model FROM bsettings WHERE owner = ?", (f"p{user_id}",))
-        if self.model:
-            self.model = self.model[0][0]
-            self.prompt = fetch_db("SELECT prompt FROM prompts WHERE owner = ?", (f"p{user_id}",))[0][0]
-        else:
-            self.init()
-        self.chatting = False
-        # a: command_content
-        self.mappings = {
-            ".prompt ": lambda a: self.prompt_set(a),
-            ".prompt": lambda a: self.prompt_reset(),
-            ".bili ": lambda a: self.bilibili(a),
-            ".random": lambda a: self.random_use(),
-            ".random ": lambda a: self.random_set(a),
-            ".model ": lambda a: self.set_model(a),
-            ".ping": lambda a: self.ping(),
-            ".chat": lambda a: self.toggle_chat(),
-            ".draw ": lambda a: self.draw(a),
-            ".chat ": lambda a: self.set_chat(a),
-            ".help": lambda a: self.help(),
-        }
-        for i in DISABLED_FUNCTIONS: # 禁用功能
-            if i in self.mappings:
-                self.mappings.pop(i)
+        self.config: dict = yaml.safe_load(open("configs/users/default.yaml", encoding="utf-8"))
+        if os.path.exists(f"configs/users/{self.user_id}.yaml"):
+            user_config = yaml.safe_load(open(f"configs/users/{self.user_id}.yaml", encoding="utf-8"))
+            if user_config:
+                self.config.update(user_config)
+        self.model = self.config["MODEL"]
+        self.custom_module = self.load_custom_script()
+        if self.custom_module:
+            self.custom_module.hook_init(self)
+        del self.config
     
-    def init(self):
-        db("INSERT INTO bsettings (owner, model) VALUES (?, ?)", (f"p{self.user_id}", DEFAULT_MODEL))
-        db("INSERT INTO prompts (owner, prompt) VALUES (?, ?)", (f"p{self.user_id}", DEFAULT_PROMPT_PERSONAL))
-        db("INSERT INTO csettings (owner, tools) VALUES (?, ?)", (f"p{self.user_id}", True))
-        db("INSERT INTO rsettings (owner, range1, range2) VALUES (?, ?, ?)", (f"p{self.user_id}", 1, 100))
-        self.model = DEFAULT_MODEL
-        self.prompt = DEFAULT_PROMPT_PERSONAL
+    def load_custom_script(self) -> ModuleType | None:
+        """动态加载对应的群组脚本"""
+        script_path = f"configs/users/{self.user_id}.py"
+        script_path = script_path if os.path.exists(script_path) else "configs/users/default.py"
+        try:
+            spec = importlib.util.spec_from_file_location("custom_module", script_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            if not hasattr(module, "hook_init"):
+                print(f"[{self.user_id}] 自定义脚本缺少 hook_init 函数")
+            elif not hasattr(module, "hook_process"):
+                print(f"[{self.user_id}] 自定义脚本缺少 hook_process 函数")
+            else:
+                return module
+        except Exception as e:
+            print(f"[{self.user_id}] 自定义脚本加载失败: {e}")
     
     async def process(self, messages):
-        text = process_first_message_text(messages)
-        command_handled = False
-        if text[:1] == '.':
-            plain_text_slices = text.split()
-            if len(plain_text_slices) == 1:
-                command_type = plain_text_slices[0]
+        print(f"用户 {self.user_id} 发送私聊消息")
+        self.messages = messages
+        self.message_send = []
+        self.plain_text = process_first_message_text(messages) # 仅处理文字，以便使用指令
+        if self.custom_module:
+            self.custom_module.hook_process(self)
+        # 处理要发送的消息
+        for i in self.message_send:
+            if type(i) == dict:
+                to_bot = i["to_bot"]
+                to_user = i["to_user"]
             else:
-                command_type = plain_text_slices[0] + " "
-            if command_type in self.mappings:  # 检查指令是否存在
-                command_content = text[len(command_type):]
-                result = self.mappings[command_type](command_content)
-                for i in result:
-                    await send_private_message(self.user_id, i)
-                    await asyncio.sleep(0.1)
-                command_handled = True
-        # 处理聊天模式
-        if self.chatting and not command_handled:
-            await self.chat(messages["message"])
-
-    def help(self):
-        return [USER_GUIDE_URL, "请复制到浏览器打开，时间可能较长"]
-    
-    def prompt_reset(self):
-        db("UPDATE prompts SET prompt = ? WHERE owner = ?", (DEFAULT_PROMPT_PERSONAL, f"p{self.user_id}"))
-        self.prompt = DEFAULT_PROMPT_PERSONAL
-        return ["设置成功，默认提示为：" + DEFAULT_PROMPT_PERSONAL]
-    
-    def prompt_set(self, command_content):
-        self.prompt = command_content
-        if self.prompt.lower() in ["empty", "none", "0", "null", "void"]:
-            self.prompt = ""
-        db("UPDATE prompts SET prompt = ? WHERE owner = ?", (self.prompt, f"p{self.user_id}"))
-        return ["设置成功"]
-    
-    def bilibili(self, command_content):
-        return [formatted_bili_summary(command_content)]
-    
-    def random_use(self):
-        result = fetch_db("SELECT range1, range2 FROM rsettings WHERE owner = ?", (f"p{self.user_id}",))
-        range1 = result[0][0]
-        range2 = result[0][1]
-        return [f"{range1} - {range2}之间的随机数: {random.randint(range1, range2)}"]
-    
-    def random_set(self, command_content):
-        text_split = command_content.split()
-        if len(text_split) == 2:
-            db("UPDATE rsettings SET range1 = ?, range2 = ? WHERE owner = ?", (text_split[0], text_split[1], f"p{self.user_id}"))
-            return ["设置成功"]
-        else:
-            return ["设置失败"]
-    
-    def set_model(self, command_content):
-        if command_content in ["ls", "list", "help"]:
-            temp = "模型列表: "
-            for name, info in MODEL_DESCRIPTIONS.items():
-                temp += f'''\n    {name}: {info["description"]}'''
-                if info["vision"]:
-                    temp += "（支持图片）"
-                if info["2in1"]:
-                    temp += "（支持切换思考模式）"
-            return [temp]
-        else:
-            model_infos = command_content.split(";")
-            if model_infos[0] in MODEL_DESCRIPTIONS:
-                if len(model_infos) == 2 and model_infos[1] in ["nonthinking", "thinking"] and MODEL_DESCRIPTIONS[model_infos[0]]["2in1"]:
-                    db("UPDATE bsettings SET model = ? WHERE owner = ?", (command_content, f"p{self.user_id}"))
-                    self.model = command_content
-                    return [f"设置成功，你选择的模型为{model_infos[0]}，使用{model_infos[1]}模式"]
-                elif len(model_infos) == 1:
-                    db("UPDATE bsettings SET model = ? WHERE owner = ?", (command_content, f"p{self.user_id}"))
-                    self.model = command_content
-                    return ["设置成功，你选择的模型为" + model_infos[0]]
-                else:
-                    return ["模式设置错误，请选择thinking或nonthinking"]
-            else:
-                return ["模型不存在，请使用.model list来查看模型列表"]
-    
-    def ping(self):
-        return ["Pong!"]
-    
-    def toggle_chat(self):
-        if self.chatting:
-            self.chatting = False
-            del self.chat_instance
-            return ["聊天模式已关闭"]
-        else:
-            self.chatting = True
-            is_tools_allowed = fetch_db("SELECT tools FROM csettings WHERE owner = ?", (f"p{self.user_id}",))[0][0]
-            self.chat_instance = CodeExecutor(model=self.model, messages=[{"role": "system", "content": self.prompt}], allow_tools=is_tools_allowed)
-            return ["聊天模式已开启"]
-
-    def draw(self, command_content):
-        url = draw(command_content)
-        return [f"[CQ:image,file={url}]"]
-
-    def set_chat(self, command_content):
-        settings = command_content.split()
-        if len(settings) != 2:
-            return ["格式错误"]
-        match settings[0]:
-            case "tools":
-                if settings[1].lower() in ["on", "true", "1"]:
-                    db("UPDATE csettings SET tools = ? WHERE owner = ?", (True, f"p{self.user_id}"))
-                    return ["已开启工具"]
-                elif settings[1].lower() in ["off", "false", "0"]:
-                    db("UPDATE csettings SET tools = ? WHERE owner = ?", (False, f"p{self.user_id}"))
-                    return ["已关闭工具"]
-                else:
-                    return ["参数错误"]
-            case _:
-                return ["未知设置项"]
-    
-    async def chat(self, messages):
-        self.chat_instance.new()
-        contains_text = False
-        for message in messages:
-            match message["type"]:
-                case "text":
-                    contains_text = True
-                    self.chat_instance.add({"type": "text", "text": message["data"]["text"]})
-                case "image":
-                    if MODEL_DESCRIPTIONS[self.model.split(";")[0]]["vision"]:
-                        self.chat_instance.add({"type": "image_url","image_url": {"url": f"data:image/jpeg;base64,{url_to_b64(message['data']['url'].replace('https', 'http'))}"}})
-                    elif OCR:
-                        image_text = ocr(message["data"]["url"].replace("https", "http"))
-                        self.chat_instance.add({"type": "text", "text": f"<图片文字: {image_text}>"})
-                    else:
-                        self.chat_instance.add({"type": "text", "text": f"<图片>"})
-                case "json":
-                    text = json.loads(message["data"]["data"])
-                    self.chat_instance.add({"type": "text", "text": f"<卡片: {text['prompt']}>"})
-                case "file":
-                    response = requests.post("http://127.0.0.1:3001/get_file", json={"file_id": message["data"]["file_id"]}).json()
-                    copy(response["data"]["file"], rf"./temp/{response['data']['file_name']}")
-                    self.chat_instance.add({"type": "text", "text": f"<文件: ./{response['data']['file_name']}>"})
-                case "video":
-                    self.chat_instance.add({"type": "text", "text": "<视频>"})
-                case "record":
-                    contains_text = True
-                    if STT:
-                        time.sleep(1)
-                        pos = message["data"]["path"]
-                        silk_to_wav(pos, "./files/file.wav")
-                        requests.get(f"http://localhost:{PORT}/sec_check?arg=file.wav")
-                        text = aliyun_stt(f"http://{BASE_URL}/download_fucking_file?filename=file.wav")
-                        self.chat_instance.add({"type": "text", "text": text})
-                    else:
-                        self.chat_instance.add({"type": "text", "text": "<语音>"})
-                case "reply":
-                    reply_data = get_message(message["data"]["id"])
-                    text = messages_to_text(reply_data)[0]
-                    self.chat_instance.add({"type": "text", "text": f"<回复: {text}>"})
-                case "face":
-                    self.chat_instance.add({"type": "text", "text": "<表情>"})
-                case "forward":
-                    foward_messages = message["data"]["content"]
-                    text = ""
-                    for i in foward_messages:
-                        text += messages_to_text(i)[0] + "\n"
-                    self.chat_instance.add({"type": "text", "text": f"<合并转发内容: {text}>"})
-                case _:
-                    self.chat_instance.add({"type": "text", "text": "<未知>"})
-        if contains_text:
-            for response in self.chat_instance.process():
-                send_private_message_http(self.user_id, response)
+                to_bot = to_user = i
+            await send_private_message(self.user_id, to_user)
+            await asyncio.sleep(0.1)
 
 async def send_private_message(user_id, message):
     # 别删!!!
@@ -617,73 +295,6 @@ def get_username(id):
     username_cache.put(id, data)
     return data
 
-def draw_tarot_cards(spread_type = 'three_card', custom_draw = None):
-    # 塔罗牌生成器
-    def create_deck():
-        major_arcana = [
-            ("{0}. {1}".format(i, name), 'Major Arcana', None) 
-            for i, name in enumerate([
-                "愚者", "魔术师", "女祭司", "皇后", "皇帝", "教皇", "恋人", "战车", 
-                "力量", "隐士", "命运之轮", "正义", "倒吊人", "死神", "节制", 
-                "恶魔", "高塔", "星星", "月亮", "太阳", "审判", "世界"
-            ])
-        ]
-
-        suits = ["权杖", "圣杯", "宝剑", "星币"]
-        minor_ranks = ["王牌"] + [str(i) for i in range(2, 11)] + ["侍从", "骑士", "皇后", "国王"]
-        
-        minor_arcana = [
-            (f"{rank} ({suit})", 'Minor Arcana', suit)
-            for suit in suits
-            for rank in minor_ranks
-        ]
-        
-        return [{"name": name, "type": t, "suit": s} for name, t, s in (major_arcana + minor_arcana)]
-
-    # 标准切牌流程
-    def cut_deck(deck):
-        split_point = random.randint(10, len(deck)-10)
-        return deck[split_point:] + deck[:split_point]
-
-    # 牌阵映射表
-    spreads = {
-        'single': 1,
-        'three_card': 3,
-        'celtic_cross': 10,
-        'horseshoe': 7
-    }
-
-    # 核心逻辑
-    deck = create_deck()
-    random.shuffle(deck)
-    deck = cut_deck(deck)  # 标准切牌
-    
-    # 确定抽牌数量
-    draw_num = custom_draw if isinstance(custom_draw, int) else spreads.get(spread_type, 3)
-    
-    # 抽取并生成结果
-    drawn = []
-    for card in deck[:draw_num]:
-        drawn.append({
-            "name": card["name"],
-            "orientation": random.choice(["正位", "逆位"]),
-            "suit": card["suit"],  # 小阿卡纳的花色
-            "arcana": card["type"]  # 大/小阿卡纳分类
-        })
-    
-    return drawn[:draw_num]  # 确保精确返回请求数量
-
-def parse_to_narrative(card_list):
-    parts = []
-    for i, card in enumerate(card_list, 1):
-        desc = f"第{i}张牌是[{card['name']}]"
-        desc += f"，以{card['orientation']}形式出现"
-        if card['suit']:
-            desc += f"，属于{card['suit']}花色"
-        desc += f"（{card['arcana']}）。\n"
-        parts.append(desc)
-    return " ".join(parts)[:-1]
-
 def get_message(id):
     result = requests.post("http://127.0.0.1:3001/get_msg", json={"message_id": id}).json()
     return result["data"]
@@ -704,6 +315,13 @@ if MULTITHREAD:
     from concurrent.futures import ThreadPoolExecutor
     executor = ThreadPoolExecutor(max_workers=20)
 
+async def remove_group(group_id):
+    """安全地从groups字典中移除群聊对象"""
+    if group_id in groups:
+        group_handler = groups[group_id]
+        await group_handler.cleanup()
+        del groups[group_id]
+
 async def handler_multithread(websocket):
     global global_websocket
     global_websocket = websocket
@@ -712,8 +330,10 @@ async def handler_multithread(websocket):
         if "message_type" in data:
             if data["message_type"] == "group":
                 executor.submit(group_message_handler, data["message"], data["group_id"], data["sender"]["nickname"], data["user_id"])
-            elif data["message_type"] == "private":
-                executor.submit(private_message_handler, data["message"], data["user_id"])
+            # elif data["message_type"] == "private":
+            #     executor.submit(private_message_handler, data["message"], data["user_id"])
+        elif "sub_type" in data and data["sub_type"] == "connect":
+            print("与Napcat连接成功！")
 
 async def handler(websocket):
     global global_websocket
@@ -742,15 +362,15 @@ def group_message_handler(messages, group_id, username, sender_id):
     finally:
         loop.close()
 
-def private_message_handler(messages, user_id):
-    if user_id not in users:
-        users[user_id] = Handle_private_message(user_id)
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(users[user_id].process(messages))
-    finally:
-        loop.close()
+# def private_message_handler(messages, user_id):
+#     if user_id not in users:
+#         users[user_id] = Handle_private_message(user_id)
+#     loop = asyncio.new_event_loop()
+#     asyncio.set_event_loop(loop)
+#     try:
+#         loop.run_until_complete(users[user_id].process(messages))
+#     finally:
+#         loop.close()
 
 
 async def main():
@@ -778,11 +398,9 @@ async def main():
 
 if __name__ == "__main__":
     print("正在初始化OpenAI客户端...")
-    for model, info in PREFIX_TO_ENDPOINT.items():
-        endpoint = info["url"]
-        api_key = info["key"]
-        if endpoint not in oclients:
-            oclients[endpoint] = OpenAI(api_key=api_key, base_url=endpoint)
+    for model in MODELS:
+        if MODELS[model]["endpoint"] not in oclients:
+            oclients[MODELS[model]["endpoint"]] = OpenAI(api_key=MODELS[model]["apikey"], base_url=MODELS[model]["endpoint"])
 
     # 使用 asyncio.run() 来启动主异步函数
     # 它会自动处理事件循环的创建、运行和关闭

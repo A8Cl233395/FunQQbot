@@ -1,7 +1,6 @@
 import requests
 import subprocess
 from bigmodel_apis import *
-import sqlite3
 
 def get_bili_text(user_input):
     if user_input.startswith("BV") or user_input.startswith("av") or user_input.startswith("bv"):
@@ -41,25 +40,6 @@ def get_bili_text(user_input):
     text = aliyun_stt(f"http://{BASE_URL}/download_fucking_file?filename=file.mp3")
     return {"status": 1, 'title': title, 'pic_url': pic_url, 'desc': desc, 'text': text, 'tag': tag}
 
-def formatted_bili_summary(command_content, model=DEFAULT_MODEL):
-    data = get_bili_text(command_content)
-    status = data["status"]
-    if status == 1:
-        try:
-            video_info = f'''标题: {data["title"]}
-简介: {data["desc"]}
-标签: {data["tag"]}
-字幕: 
-{data["text"]}'''
-            summary = ask_ai(VIDEO_SUMMARY_PROMPT, video_info, model=model)
-            return f'''[CQ:image,file={data["pic_url"]}]标题: {data["title"]}\n简介: {data["desc"]}\n标签: {data["tag"]}\n总结: {summary}'''
-        except:
-            return f'''[CQ:image,file={data["pic_url"]}]标题: {data["title"]}\n简介: {data["desc"]}\n标签: {data["tag"]}\n无法总结'''
-    elif status == 0:
-        return "Failed"
-    elif status == 2:
-        return f'''[CQ:image,file={data["pic_url"]}]标题: {data["title"]}\n简介: {data["desc"]}\n标签: {data["tag"]}'''
-
 def silk_to_wav(input, output):
     #FUCK U TENCENT
     command = [
@@ -79,35 +59,6 @@ def silk_to_wav(input, output):
         '-y'
     ]
     subprocess.run(command, check=True, stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-
-def fetch_db(prompt, data=None):
-    conn = sqlite3.connect('./database.db')
-    conn.row_factory = sqlite3.Row  # 使返回结果为字典样式
-    cursor = conn.cursor()
-    try:
-        cursor.execute(prompt, data or ())
-        result = cursor.fetchall()
-        conn.commit()
-        return result
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        cursor.close()
-        conn.close()
-
-def db(prompt, data=None):
-    conn = sqlite3.connect('./database.db')
-    cursor = conn.cursor()
-    try:
-        cursor.execute(prompt, data or ())
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        cursor.close()
-        conn.close()
 
 def get_netease_music_details_text(song_id, comment_limit=5):
     lyric_api = f"https://music.163.com/api/song/lyric?os=pc&id={song_id}&lv=-1&tv=-1"
@@ -153,24 +104,17 @@ def get_netease_music_details_text(song_id, comment_limit=5):
     combined += f"热评:\n```\n{comments_text}\n```"
     return combined
 
-def get_weather(adcode=WEATHER_ADCODE):
-    result = requests.get(f"https://restapi.amap.com/v3/weather/weatherInfo?key={AMAP_KEY}&city={adcode}&extensions=base").json()
-    return {"time": time.time(), "weather": result["lives"][0]["weather"], "temperature": result["lives"][0]["temperature"], "humidity": result["lives"][0]["humidity"], "windpower": result["lives"][0]["windpower"]}
-
-def get_poem():
-    result = requests.get("https://v1.jinrishici.com/all.json").json()
-    return f"{result['content']} - {result['origin']}"
-
-def get_tip():
-    return requests.get("https://v1.hitokoto.cn").json()['hitokoto']
-
 def get_page_text_with_parser(url):
     domain_regex = r"^(?:https?:)?(?:\/\/)?([^\/\?:]+)(?:[\/\?:].*)?$"
     domain = re.search(domain_regex, url).group(1)
     try:
         match domain:
-            case "music.163.com" | "163cn.tv":
+            case "music.163.com":
                 song_id = re.search(r"id=(\d+)", url).group(1)
+                return get_netease_music_details_text(song_id)
+            case "163cn.tv":
+                actual_link = _get_final_url_without_content(url)
+                song_id = re.search(r"id=(\d+)", actual_link).group(1)
                 return get_netease_music_details_text(song_id)
             case "b23.tv" | "bilibili.com" | "www.bilibili.com":
                 video_data = get_bili_text(url)
@@ -180,3 +124,24 @@ def get_page_text_with_parser(url):
                 return get_page_text(url)
     except:
         return get_page_text(url)
+
+def _get_final_url_without_content(short_url):
+    try:
+        # 发送HEAD请求（有些服务器可能不支持HEAD方法）
+        try:
+            response = requests.head(short_url, allow_redirects=True, timeout=10)
+            return response.url
+        except:
+            # 如果HEAD失败，使用GET但只读取头部
+            response = requests.get(short_url, allow_redirects=False, timeout=10)
+            
+            # 如果有重定向
+            if response.status_code in (301, 302, 303, 307, 308):
+                redirect_url = response.headers.get('Location')
+                if redirect_url:
+                    # 可能需要递归处理多次重定向
+                    return _get_final_url_without_content(redirect_url)
+            return response.url
+    except requests.exceptions.RequestException as e:
+        print(f"请求失败: {e}")
+        return None

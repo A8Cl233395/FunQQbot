@@ -1,4 +1,11 @@
 __pycache__
 test.py
 test2.py
-settings.yaml
+configs/**
+!configs/groups/
+!configs/groups/default.yaml
+!configs/groups/default.py
+!configs/users/
+!configs/users/default.yaml
+!configs/users/default.py
+!configs/base-template.yaml
