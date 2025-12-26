@@ -159,9 +159,4 @@ def bad_request(error):
 
 if __name__ == '__main__':
     print(f"文件服务启动在 http://0.0.0.0:{PORT}")
-    print("安全特性已启用：")
-    print("  - 文件名安全检查")
-    print("  - 请求频率限制（10次/分钟）")
-    print("  - 本地请求验证")
-    print("  - 路径遍历攻击防护")
     app.run(host="0.0.0.0", port=PORT, debug=False)

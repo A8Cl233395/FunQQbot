@@ -25,20 +25,20 @@ def messages_to_text(data, self_name=DEFAULT_NAME) -> tuple[str, str, bool]:
                 message_text = message["data"]["text"]
                 if f"@{self_name}" in message_text:
                     is_mentioned = True
-                output_text += f" {message_text}"
+                output_text += f"\n{message_text}"
             case "image":
                 if ENABLE_OCR:
                     image_text = ocr(message["data"]["url"].replace("https", "http"))
-                    output_text += f" ```图片OCR结果\n{image_text}\n``` "
+                    output_text += f"\n```图片OCR结果\n{image_text}\n``` "
                 else:
-                    output_text += f" <图片>"
+                    output_text += f"\n<图片>"
             case "json":
                 text = json.loads(message["data"]["data"])
-                output_text += f" ```卡片\n{text['prompt']}\n```"
+                output_text += f"\n```卡片\n{text['prompt']}\n```"
             case "file":
-                output_text += f" ```文件\n名称: {message['data']['file']}\n```"
+                output_text += f"\n```文件\n名称: {message['data']['file']}\n```"
             case "video":
-                output_text += " <视频>"
+                output_text += "\n<视频>"
             case "record":
                 if ENABLE_STT:
                     time.sleep(1)
@@ -46,9 +46,9 @@ def messages_to_text(data, self_name=DEFAULT_NAME) -> tuple[str, str, bool]:
                     silk_to_wav(pos, "./files/file.wav")
                     requests.get(f"http://localhost:{PORT}/sec_check?arg=file.wav")
                     text = aliyun_stt(f"http://{BASE_URL}/download_fucking_file?filename=file.wav")
-                    output_text += f" {text}"
+                    output_text += f"\n{text}"
                 else:
-                    output_text += " <语音>"
+                    output_text += "\n<语音>"
             case "at":
                 qq_id = message["data"]["qq"]
                 if qq_id == SELF_ID_STR:
@@ -69,17 +69,17 @@ def messages_to_text(data, self_name=DEFAULT_NAME) -> tuple[str, str, bool]:
                 marked_reply = "\n".join([f"> {i}" for i in reply.splitlines()])
                 output_text += marked_reply
             case "face":
-                output_text += " <动画表情>"
+                output_text += "\n<动画表情>"
             case "forward":
                 foward_messages = message["data"]["content"]
                 text = ""
                 for i in foward_messages:
                     text += messages_to_text(i, self_name=self_name)[0] + "\n"
-                output_text += f" ```合并转发内容\n{text}``` "
+                output_text += f"\n```合并转发内容\n{text}``` "
             case "markdown":
-                output_text += f" ```markdown\n{message['data']['content']}\n```"
+                output_text += f"\n```markdown\n{message['data']['content']}\n```"
             case _:
-                output_text += f" <未知>"
+                output_text += f"\n<未知>"
                 print("发生错误")
                 print(message)
                 print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
@@ -314,6 +314,7 @@ async def send_group_message(group_id, message):
 if MULTITHREAD:
     from concurrent.futures import ThreadPoolExecutor
     executor = ThreadPoolExecutor(max_workers=20)
+    user_threads = {}  # 用于跟踪每个用户的线程
 
 async def remove_group(group_id):
     """安全地从groups字典中移除群聊对象"""
@@ -329,9 +330,18 @@ async def handler_multithread(websocket):
         data = json.loads(message)
         if "message_type" in data:
             if data["message_type"] == "group":
-                executor.submit(group_message_handler, data["message"], data["group_id"], data["sender"]["nickname"], data["user_id"])
-            # elif data["message_type"] == "private":
-            #     executor.submit(private_message_handler, data["message"], data["user_id"])
+                executor.submit(_group_message_handler, data, data["group_id"])
+            elif data["message_type"] == "private":
+                user_id = data["user_id"]
+                # 检查是否有正在处理的线程
+                if user_id in user_threads:
+                    thread = user_threads[user_id]
+                    if thread.running():
+                        thread.cancel()  # 取消上一个线程
+                        print(f"取消用户 {user_id} 的上一个线程")
+                # 提交新的线程并记录
+                future = executor.submit(_private_message_handler, data, user_id)
+                user_threads[user_id] = future
         elif "sub_type" in data and data["sub_type"] == "connect":
             print("与Napcat连接成功！")
 
@@ -352,25 +362,25 @@ async def handler(websocket):
         elif "sub_type" in data and data["sub_type"] == "connect":
             print("与Napcat连接成功！")
 
-def group_message_handler(messages, group_id, username, sender_id):
+def _group_message_handler(messages, group_id):
     if group_id not in groups:
         groups[group_id] = Handle_group_message(group_id)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        loop.run_until_complete(groups[group_id].process(messages, username, sender_id))
+        loop.run_until_complete(groups[group_id].process(messages))
     finally:
         loop.close()
 
-# def private_message_handler(messages, user_id):
-#     if user_id not in users:
-#         users[user_id] = Handle_private_message(user_id)
-#     loop = asyncio.new_event_loop()
-#     asyncio.set_event_loop(loop)
-#     try:
-#         loop.run_until_complete(users[user_id].process(messages))
-#     finally:
-#         loop.close()
+def _private_message_handler(messages, user_id):
+    if user_id not in users:
+        users[user_id] = Handle_private_message(user_id)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(users[user_id].process(messages))
+    finally:
+        loop.close()
 
 
 async def main():

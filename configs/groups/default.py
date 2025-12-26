@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING
 
 # 这一块只在 IDE 类型检查时运行，实际运行时不会循环导入
 if TYPE_CHECKING:
-    from main import Handle_group_message  # 替换成你存放主类的文件名
+    from main import Handle_group_message
 
 def hook_init(self: "Handle_group_message"):
     # self.config # 当前群组配置 dict

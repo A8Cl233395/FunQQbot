@@ -1,7 +1,7 @@
 from services import *
 
 class CodeExecutor:
-    def __init__(self, model=DEFAULT_MODEL, messages=[], allow_tools=True, to_cut_length=100, cut_to_length=50):
+    def __init__(self, model=DEFAULT_MODEL, messages=[], allow_tools=True, to_cut_length=40, cut_to_length=20, max_save_words=150000):
         self.oclient = get_oclient(model)
         self.tools = [
             {
@@ -52,6 +52,7 @@ class CodeExecutor:
         self.tool_responses = []
         self.to_cut_length = to_cut_length
         self.cut_to_length = cut_to_length
+        self.max_save_words = max_save_words
         self.tool_mappings = {"web_search": "keyword", "visit": "content"}
 
     def ai(self):
@@ -266,20 +267,61 @@ class CodeExecutor:
     def add(self, content: dict):
         self.messages[-1]["content"].append(content)
     
-    def cut(self, length: int):
+    def cut(self):
         """截断对话记录，保留最近的length条消息"""
-        if length >= len(self.messages):
+        # 提前计算必要的变量，避免重复计算
+        msg_count = len(self.messages)
+        
+        # 如果当前消息数量小于等于保留长度，无需截断
+        if self.length >= msg_count:
             return
+        
+        # 计算消息内容的字符长度（只计算一次）
+        msg_str_length = len(str(self.messages))
+        
+        def _remove_non_user_messages(start_idx, end_condition):
+            """移除非用户发起的消息，直到遇到user角色或满足终止条件"""
+            current_idx = start_idx
+            while not end_condition(current_idx):
+                self.messages.pop(current_idx)
+                # 每次pop后重新计算字符长度
+                nonlocal msg_str_length
+                msg_str_length = len(str(self.messages))
+        
+        # 处理包含system消息的情况
         if self.messages[0]["role"] == "system":
-            self.messages = [self.messages[0]] + self.messages[-(length-1):]
-            while not self.messages[1]["role"] == "user":
-                self.messages.pop(1)
+            # 保留system消息 + 最近的length-1条消息
+            self.messages = [self.messages[0]] + self.messages[-(self.length-1):]
+            
+            # 定义终止条件：第一条非system消息是user 或 只剩2条消息 或 字符长度达标
+            def system_end_condition(idx):
+                return (self.messages[idx]["role"] == "user" 
+                        or len(self.messages) <= 2 
+                        or msg_str_length <= self.max_save_words)
+            
+            _remove_non_user_messages(1, system_end_condition)
+        
+        # 处理无system消息的情况
         else:
-            self.messages = self.messages[-length:]
-            while not self.messages[0]["role"] == "user":
-                self.messages.pop(0)
-    
+            # 保留最近的length条消息
+            self.messages = self.messages[-self.length:]
+            
+            # 定义终止条件：第一条消息是user 或 只剩1条消息 或 字符长度达标
+            def normal_end_condition(idx):
+                return (self.messages[idx]["role"] == "user" 
+                        or len(self.messages) <= 1 
+                        or msg_str_length <= self.max_save_words)
+            
+            _remove_non_user_messages(0, normal_end_condition)
+
     def _check_if_cut(self):
         """检查是否需要截断对话记录"""
-        if len(self.messages) > self.to_cut_length:
-            self.cut(self.cut_to_length)
+        # 提前计算，避免重复调用len()
+        msg_count = len(self.messages)
+        # 只在必要时计算字符串长度（这是高开销操作）
+        need_cut = (msg_count > self.to_cut_length)
+        if not need_cut and self.max_save_words > 0:
+            need_cut = len(str(self.messages)) > self.max_save_words
+        
+        if need_cut:
+            self.cut()

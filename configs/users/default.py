@@ -10,11 +10,11 @@ from main import get_message, messages_to_text, send_private_message_http
 
 # 这一块只在 IDE 类型检查时运行，实际运行时不会循环导入
 if TYPE_CHECKING:
-    from main import Handle_private_message  # 替换成你存放主类的文件名
+    from main import Handle_private_message
 
 def hook_init(self: "Handle_private_message"):
     # self.config # 当前用户配置 dict
-    self.chat_instance = CodeExecutor(self.model, [], True, 100, 50)
+    self.chat_instance = CodeExecutor(self.model, [], False)
     pass
 
 def hook_process(self: "Handle_private_message"):
@@ -30,7 +30,7 @@ def hook_process(self: "Handle_private_message"):
                     contains_text = True
                     self.chat_instance.add({"type": "text", "text": message["data"]["text"]})
                 case "image":
-                    if MODELS[self.model]:
+                    if MODELS[self.model]["vision"]:
                         self.chat_instance.add({"type": "image_url","image_url": {"url": f"data:image/jpeg;base64,{url_to_b64(message['data']['url'].replace('https', 'http'))}"}})
                     elif ENABLE_OCR:
                         image_text = ocr(message["data"]["url"].replace("https", "http"))
@@ -70,7 +70,6 @@ def hook_process(self: "Handle_private_message"):
                     self.chat_instance.add({"type": "text", "text": f" ```合并转发内容\n{text}``` "})
                 case _:
                     self.chat_instance.add({"type": "text", "text": "<未知>"})
-        print(self.chat_instance.messages)
         if contains_text:
             for response in self.chat_instance.process():
                 send_private_message_http(self.user_id, response)

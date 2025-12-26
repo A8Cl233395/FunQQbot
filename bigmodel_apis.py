@@ -2,6 +2,7 @@ import json
 from openai import OpenAI
 from spider import *
 import base64
+from hashlib import sha256
 from base_settings import *
 from collections import OrderedDict
 
@@ -67,8 +68,8 @@ class LRUCache:
 
 # 全局缓存变量
 oclients: dict[str, OpenAI] = {}
-b64_cache = LRUCache()
-ocr_cache = LRUCache()
+url_b64_cache = LRUCache()
+sha256_text_cache = LRUCache()
 
 def get_oclient(model: str) -> OpenAI:
     endpoint = MODELS[model]["endpoint"]
@@ -126,18 +127,20 @@ def get_aliyun_stt_result_loop(task_id):
 
 
 def url_to_b64(url, cache=True) -> str:
-    if b64_cache.get(url):
-        return b64_cache.get(url)
+    if url_b64_cache.get(url):
+        return url_b64_cache.get(url)
     response = requests.get(url)
     img_base64 = base64.b64encode(response.content).decode('utf-8')
     if cache:
-        b64_cache.put(url, img_base64)
+        url_b64_cache.put(url, img_base64)
     return img_base64
 
 def ocr(url: str) -> str:
-    if ocr_cache.get(url):
-        return ocr_cache.get(url)
     img_base64 = url_to_b64(url)
+    image_hash = sha256(img_base64.encode('utf-8')).hexdigest()
+    if sha256_text_cache.get(image_hash):
+        result = sha256_text_cache.get(image_hash)
+        return result
     json_data = json.dumps({
         "base64": img_base64,
         "options": {
@@ -146,5 +149,5 @@ def ocr(url: str) -> str:
         }
     })
     result = requests.post('http://127.0.0.1:1224/api/ocr', headers={"Content-Type": "application/json"}, data=json_data).json()["data"]
-    ocr_cache.put(url, result)
+    sha256_text_cache.put(image_hash, result)
     return result
