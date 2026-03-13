@@ -13,8 +13,8 @@
 
 ### 🎯 消息处理
 - 文本消息解析与回复
-- 图片OCR识别（需Umi-OCR服务）
-- 语音转文字处理（需阿里云语音识别）
+- 图片OCR识别（通过远程API服务）
+- 语音转文字处理（通过远程API服务）
 - 文件、视频、表情等多媒体消息支持
 
 ### 🔧 插件系统
@@ -40,11 +40,6 @@
 ## 开源协议
 
 本项目采用 [CC-BY-SA-4.0](LICENSE)
-
-### 使用的开源项目及协议
-
-- [geckodriver](https://github.com/mozilla/geckodriver) - 用于驱动Firefox浏览器，协议：[MPL-2.0](/assets/MPL-2.0)
-- [silk-v3-decoder](https://github.com/kn007/silk-v3-decoder) - 用于语音解码，协议：[MIT](/assets/MIT)
 
 ---
 

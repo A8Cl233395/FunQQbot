@@ -1,50 +1,50 @@
 # QQ机器人基础配置模板
 # 复制此文件为 configs/base.yaml 并填写实际值
 
-# 阿里云语音识别API密钥（用于语音转文字）
-ALIYUN_KEY: "your_aliyun_api_key_here"
-
-# 基础URL（用于文件下载服务）
-BASE_URL: "http://localhost:3000"
-
-# 文件服务端口
-PORT: 3000
-
-# FFmpeg可执行文件路径
-FFMPEG_PATH: "C:/path/to/ffmpeg.exe"
+# 远程API配置(https://github.com/A8Cl233395/BingScraperApi)
+REMOTE_API_URL: https://your-remote-api-url.com
+REMOTE_API_KEY: your_remote_api_key_here
 
 # 功能开关
 ENABLE_OCR: true      # 启用图片OCR识别（需Umi-OCR服务）
 ENABLE_STT: true      # 启用语音转文字（需阿里云API密钥）
 
-# 多线程处理（提高并发性能）
-MULTITHREAD: false
-
 # 机器人QQ号
 SELF_ID: 123456789
-
-# 默认名称
-DEFAULT_NAME: "机器人"
-
-# 默认温度参数（影响AI回复的随机性）
-TEMPERATURE: 1.0
-
-# 默认模型
-DEFAULT_MODEL: "deepseek-chat"
 
 # 大模型配置
 MODELS:
   deepseek-chat:
-    endpoint: "https://api.deepseek.com"
-    apikey: "your_deepseek_api_key_here"
-    vision: false
-  
-  qwen-plus:
-    endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    apikey: "your_qwen_api_key_here"
-    vision: false
-  
-  gpt-4o:
-    endpoint: "https://api.openai.com/v1"
-    apikey: "your_openai_api_key_here"
-    vision: true
+    api_key: your_deepseek_api_key_here
+    default-thinking: false
+    think-during-tool-calls: true
+    thinking-toggle-extra-body:
+      'false':
+        thinking:
+          type: disabled
+      'true':
+        thinking:
+          type: enabled
+    url: https://api.deepseek.com/beta
+  kimi-k2.5:
+    api_key: your_kimi_api_key_here
+    default-thinking: true
+    think-during-tool-calls: true
+    thinking-toggle-extra-body:
+      'false':
+        thinking:
+          type: disabled
+      'true':
+        thinking:
+          type: enabled
+    url: https://api.moonshot.cn/v1
+  qwen3.5-plus:
+    api_key: your_qwen_api_key_here
+    default-thinking: false
+    think-during-tool-calls: false
+    thinking-toggle-extra-body:
+      'false':
+        enable_thinking: false
+      'true':
+        enable_thinking: true
+    url: https://dashscope.aliyuncs.com/compatible-mode/v1

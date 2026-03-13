@@ -5,30 +5,41 @@ import requests
 if not os.path.exists("configs/base.yaml") or not os.path.exists("configs/groups/default.yaml") or not os.path.exists("configs/users/default.yaml"):
     print("找不到配置文件！")
     exit(1)
-
-base_config = yaml.safe_load(open("configs/base.yaml", encoding="utf-8"))
-ALIYUN_KEY: str = base_config["ALIYUN_KEY"]
-BASE_URL: str = base_config["BASE_URL"]
-PORT: int = base_config["PORT"]
-FFMPEG_PATH: str = base_config["FFMPEG_PATH"]
+with open("configs/base.yaml", encoding="utf-8") as f:
+    base_config = yaml.safe_load(f)
+del f
+REMOTE_API_URL: str = base_config["REMOTE_API_URL"]
+REMOTE_API_KEY: str = base_config["REMOTE_API_KEY"]
 ENABLE_OCR: bool = base_config["ENABLE_OCR"]
 ENABLE_STT: bool = base_config["ENABLE_STT"]
 MODELS: dict = base_config["MODELS"]
-MULTITHREAD: bool = base_config["MULTITHREAD"]
 SELF_ID: int = base_config["SELF_ID"]
-DEFAULT_NAME: str = base_config["DEFAULT_NAME"]
 SELF_ID_STR: str = str(SELF_ID)
-TEMPERATURE: int = base_config["TEMPERATURE"]
-DEFAULT_MODEL: str = base_config["DEFAULT_MODEL"]
 
 del base_config
 
-if not ALIYUN_KEY:
-    ENABLE_STT = False
-
-if ENABLE_OCR:
+try:
+    response = requests.get(f"{REMOTE_API_URL}/status", headers={"key": REMOTE_API_KEY})
+    if response.status_code == 403:
+        print("远程API密钥错误！")
+        exit(1)
+    elif response.status_code == 500:
+        print("远程API服务错误！")
+        exit(1)
+    service_status = response.json()
+    if not service_status["ocr"] and ENABLE_OCR:
+        print("远程API OCR 功能未开启！")
+        exit(1)
+    if not service_status["transcribe"] and ENABLE_STT:
+        print("远程API 语音转文字 功能未开启！")
+        exit(1)
+except requests.exceptions.RequestException:
+    print("无法连接到远程API服务！")
+    exit(1)
+finally:
     try:
-        requests.get("http://localhost:1224", timeout=2)
+        del response, service_status
     except:
-        ENABLE_OCR = False
-        print("OCR 服务未启动，已关闭 OCR 功能")
+        pass
+
+print("配置加载完成！")

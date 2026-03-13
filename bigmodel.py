@@ -1,327 +1,293 @@
-from services import *
+from custom_functions import *
+import json
 
-class CodeExecutor:
-    def __init__(self, model=DEFAULT_MODEL, messages=[], allow_tools=True, to_cut_length=40, cut_to_length=20, max_save_words=150000):
-        self.oclient = get_oclient(model)
+class ChatInstance:
+    def __init__(self, model = "deepseek-chat", vision_model = "qwen3-vl-plus-2025-12-19", messages: list[dict] | None = None, thinking: bool = False, enable_function: bool = False):
+        self.oclient = Utils.oclient(model)
+        self.model = model
+        self.vision_model = vision_model
+        self.messages: list[dict] = messages if messages else []
+        self.contain_image = False
+        self.enable_function = enable_function
+        self.thinking = thinking
+
+        if self.messages:
+            for message in self.messages:
+                if message['role'] == 'user' and type(message['content']) == list and message['content'][0]['type'] == 'image_url':
+                    self.contain_image = True
+                    self.model = self.vision_model
+                    self.oclient = Utils.oclient(self.vision_model)
+                    break
+                elif message['role'] == 'tool':
+                    self.enable_function = True
+
         self.tools = [
             {
                 "type": "function",
                 "function": {
-                    "name": "web_search",
-                    "description": "使用搜索引擎搜索网络，搜索后需要使用visit访问",
+                    "name": "searchWeb",
+                    "description": "在互联网上搜索指定的查询",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "keyword": {
-                                "description": "关键词",
+                            "query": {
+                                "description": "要搜索的查询字符串",
                                 "type": "string",
                             },
                         },
-                        "required": ["keyword"]
+                        "required": ["query"]
+                    },
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "readURL",
+                    "description": "从互联网上读取指定URL的内容",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "url": {
+                                "description": "要访问的网页的URL",
+                                "type": "string",
+                            },
+                        },
+                        "required": ["url"]
                     },
                 },
             },
             {
                 "type": "function",
                 "function": {
-                    "name": "visit",
-                    "description": "直接访问链接或使用序号访问搜索结果，返回动态网页中的文字。对网易云音乐和哔哩哔哩有特殊解析。",
+                    "name": "GetNeteaseMusicInfo",
+                    "description": "获取网易云音乐歌曲的歌词、作者和热门评论。需要提供链接或ID之一。",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "content": {
-                                "description": "链接/数字序号",
+                            "id": {
+                                "description": "网易云音乐歌曲的ID。推荐使用。",
                                 "type": "string",
                             },
+                            "url": {
+                                "description": "网易云音乐歌曲的链接。",
+                                "type": "string",
+                            }
                         },
-                        "required": ["content"]
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "getBilibiliVideoInfo",
+                    "description": "获取B站视频的字幕、上传者和标签信息。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "bv": {
+                                "description": "视频的BV号。推荐使用。",
+                                "type": "string",
+                            },
+                            "url": {
+                                "description": "视频的链接。",
+                                "type": "string",
+                            }
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "getRandomPicture",
+                    "description": "获取随机图片。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                        },
                     },
                 },
             },
         ]
-        if messages:
-            if messages[0]["role"] == "system":
-                if not messages[0]["content"]:
-                    messages.pop(0)
-        self.tools = self.tools if allow_tools else []
-        self.safe_tools = ["web_search", "visit"]
-        self.status = 0
-        self.model = model
-        self.messages = messages
-        self.status = 0 # 0: 无需确认 1: 需要确认
-        self.tool_responses = []
-        self.to_cut_length = to_cut_length
-        self.cut_to_length = cut_to_length
-        self.max_save_words = max_save_words
-        self.tool_mappings = {"web_search": "keyword", "visit": "content"}
 
     def ai(self):
+        print(self.messages)
         params = {
             "model": self.model,
             "messages": self.messages,
-            "temperature": TEMPERATURE,
-            "stream": True,
+            "stream": True
         }
-        if self.tools:
+        if self.enable_function:
             params["tools"] = self.tools
+        if MODELS[self.model].get("default-thinking") is not None and self.thinking != MODELS[self.model]["default-thinking"]:
+            if self.thinking:
+                params["extra_body"] = MODELS[self.model]["thinking-toggle-extra-body"]["true"]
+            else:
+                params["extra_body"] = MODELS[self.model]["thinking-toggle-extra-body"]["false"]
         completion = self.oclient.chat.completions.create(**params)
         return completion
-    
-    def process(self):
-        match self.status:
-            case 0:
-                if self.tool_responses:
-                    self.messages.extend(self.tool_responses)
-                    self.tool_responses = []
-                completion = self.ai()
-                buffer = ""
-                buffer_thinking = ""
-                full_content = ""
-                is_thinking = False
-                is_answering = False
-                is_using_tool = False
-                self.tool_calls = []
-                for chunk in completion:
-                    delta = chunk.choices[0].delta
-                    if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                        if not is_thinking:
-                            is_thinking = True
-                            yield "---Thinking---"
-                        buffer_thinking += delta.reasoning_content
-                        if "\n\n" in buffer_thinking:
-                            parts = buffer_thinking.split("\n\n", 1)
-                            yield parts[0].strip()
-                            buffer_thinking = parts[1].strip() if len(parts) > 1 else ""  # 双换行之后的内容（如果有）
-                    elif hasattr(delta, "content") and delta.content:
-                        if is_thinking and not is_answering:
-                            if buffer_thinking:
-                                yield buffer_thinking.strip()
-                            is_answering = True
-                            yield "---Answering---"
-                        buffer += delta.content
-                        full_content += delta.content
-                        if "\n\n" in buffer:
-                            parts = buffer.split("\n\n", 1)
-                            yield parts[0].strip()
-                            buffer = parts[1] if len(parts) > 1 else ""
-                    elif hasattr(delta, "tool_calls") and delta.tool_calls:
-                        if not is_using_tool:
-                            if buffer:
-                                yield buffer.strip()
-                                buffer = ""
-                            is_using_tool = True
-                        for tool_call in delta.tool_calls:
-                            if tool_call.id:
-                                self.tool_calls.append({
-                                    "id": tool_call.id,
-                                    "function": {
-                                        "arguments": "",
-                                        "name": tool_call.function.name,
-                                    },
-                                    "type": "function",
-                                })
-                            if tool_call.function.arguments:
-                                if tool_call.index:
-                                    self.tool_calls[tool_call.index]["function"]["arguments"] += tool_call.function.arguments
-                                else: # 兼容gemini
-                                    self.tool_calls[-1]["function"]["arguments"] += tool_call.function.arguments
+
+    def __call__(self, think_during_tool_calls=False, cut: int=50):
+        completion = self.ai()
+        answering_content = ""
+        reasoning_content = ""
+        buffer = ""
+        is_thinking = False
+        is_answering = False
+        tool_calls = []
+        tool_responses = []
+        for chunk in completion:
+            delta = chunk.choices[0].delta
+            if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                if not is_thinking:
+                    is_thinking = True
+                    yield "---Thinking---"
+                reasoning_content += delta.reasoning_content
+                buffer += delta.reasoning_content
+                if "\n\n" in buffer:
+                    parts = buffer.split("\n\n", 1)
+                    yield parts[0].strip()
+                    buffer = parts[1].strip() if len(parts) > 1 else ""  # 双换行之后的内容（如果有）
+            elif hasattr(delta, "content") and delta.content:
+                if not is_answering:
+                    if buffer:
+                        yield buffer.strip()
+                        buffer = ""
+                    if is_thinking:
+                        yield "---Answering---"
+                    is_answering = True
+                answering_content += delta.content
+                buffer += delta.content
+                if "\n\n" in buffer:
+                    parts = buffer.split("\n\n", 1)
+                    yield parts[0].strip()
+                    buffer = parts[1].strip() if len(parts) > 1 else ""  # 双换行之后的内容（如果有）
+            elif hasattr(delta, "tool_calls") and delta.tool_calls:
                 if buffer:
                     yield buffer.strip()
                     buffer = ""
-                self.messages.append({"role": "assistant", "content": full_content})
-                if self.tool_calls:
-                    self.messages[-1]["tool_calls"] = self.tool_calls
-                    self.tool_responses = []
-                    for index, tool_call in enumerate(self.tool_calls):
-                        self.dealing_call_index = index
-                        try:
-                            function_json = json.loads(tool_call["function"]["arguments"])
-                            yield f"---工具调用---\n函数: {tool_call['function']['name']}\n内容:\n{function_json[self.tool_mappings[tool_call['function']['name']]]}"
-                            response = self.deal_function_call(tool_call, function_json)
-                            if response["ready"]:
-                                self.tool_responses.append({
-                                    "role": "tool",
-                                    "content": response["content"],
-                                    "tool_call_id": tool_call["id"],
-                                })
-                                if "to_user" not in response:
-                                    response["to_user"] = response["content"]
-                                yield f"---工具调用返回---\n内容:\n{response['to_user']}"
-                            else:
-                                self.status = 1
-                                yield f"---调用需要确认---"
-                                return
-                        except json.JSONDecodeError:
-                            self.tool_responses.append({
-                                "role": "tool",
-                                "content": "工具调用错误",
-                                "tool_call_id": tool_call["id"],
-                            })
-                            yield "---工具调用错误---"
-                    if self.tool_responses:
-                        self.messages.extend(self.tool_responses)
-                        self.tool_responses = []
-                    yield from self.process()
-            case 1:
-                confimation = self.messages[-1]["content"][-1]["text"]
-                self.messages.pop()
-                if confimation.lower() in ["yes", "y"]:
-                    current_call = self.tool_calls[self.dealing_call_index]
-                    function_json = json.loads(current_call["function"]["arguments"])
-                    response = self.deal_function_call(current_call, function_json, force=True)
-                    self.tool_responses.append({
-                        "role": "tool",
-                        "content": response["content"],
-                        "tool_call_id": current_call["id"],
-                    })
-                    yield f"---工具调用返回---\n内容:\n{response['content']}"
-                else:
-                    yield f"---工具调用返回---\n内容:\n用户拒绝了调用。"
-                    self.tool_responses.append({
-                        "role": "tool",
-                        "content": "用户拒绝了调用。",
-                        "tool_call_id": self.tool_calls[self.dealing_call_index]["id"],
-                    })
-                self.status = 0
-                if len(self.tool_responses) != self.dealing_call_index + 1:
-                    for index, tool_call in enumerate(self.tool_calls[self.dealing_call_index+1:]):
-                        self.dealing_call_index = index
-                        try:
-                            function_json = json.loads(tool_call["function"]["arguments"])
-                            yield f"---工具调用---\n函数: {tool_call['function']['name']}\n内容:\n{function_json[self.tool_mappings[tool_call['function']['name']]]}"
-                            response = self.deal_function_call(tool_call, function_json)
-                            if response["ready"]:
-                                yield f"---工具调用返回---\n内容:\n{response['content']}"
-                                self.tool_responses.append({
-                                    "role": "tool",
-                                    "content": response["content"],
-                                    "tool_call_id": tool_call["id"],
-                                })
-                            else:
-                                self.status = 1
-                                yield f"---调用需要确认---"
-                                return
-                        except json.JSONDecodeError:
-                            self.tool_responses.append({
-                                "role": "tool",
-                                "content": "工具调用错误",
-                                "tool_call_id": tool_call["id"],
-                            })
-                            yield "---工具调用错误---"
-                self.messages.extend(self.tool_responses)
-                self.tool_responses = []
-                yield from self.process()
-        self._check_if_cut()
+                for tool_call in delta.tool_calls:
+                    if tool_call.id and tool_call.function.name: # 新的tool call
+                        if tool_calls: # 处理旧的（完成生成的）tool call
+                            yield self._tool_call_json_parser(tool_calls[-1])
+                            # TODO: 懒得优化了，卡着
+                            tool_responses.append(self._handle_tool_call(tool_calls[-1]))
+                            yield "---Tool Response---"
+                            yield tool_responses[-1]["content"] if len(tool_responses[-1]["content"]) <= cut else tool_responses[-1]["content"][:cut] + "..."
+                        tool_calls.append({
+                            "id": tool_call.id,
+                            "function": {
+                                "arguments": "",
+                                "name": tool_call.function.name,
+                            },
+                            "type": "function",
+                        })
+                        yield f"---Tool Call: {tool_call.function.name}---" if tool_call.function.name else "---Tool Call---"
+                    if tool_call.function.arguments:
+                        if tool_call.index:
+                            tool_calls[tool_call.index]["function"]["arguments"] += tool_call.function.arguments
+                        else: # 兼容gemini。gemini只有一个tool call并且index = None
+                            tool_calls[-1]["function"]["arguments"] += tool_call.function.arguments
+        
+        if buffer:
+            yield buffer.strip()
+
+        if not tool_calls:
+            self.messages.append({"role": "assistant", "content": answering_content})
+            if think_during_tool_calls: # 移除deepseek的reasoning_content
+                for message in self.messages:
+                    if message["role"] == "assistant" and "reasoning_content" in message:
+                        del message["reasoning_content"]
+        else:
+            # 处理最后一个tool call
+            yield self._tool_call_json_parser(tool_calls[-1])
+            tool_responses.append(self._handle_tool_call(tool_calls[-1]))
+            yield "---Tool Response---"
+            yield tool_responses[-1]["content"] if len(tool_responses[-1]["content"]) <= cut else tool_responses[-1]["content"][:cut] + "..."
+            self.messages.append({"role": "assistant", "content": answering_content, "tool_calls": tool_calls})
+            if is_thinking and MODELS[self.model].get("think-during-tool-calls", False):
+                self.messages[-1]["reasoning_content"] = reasoning_content
+                think_during_tool_calls = True
+            self.messages.extend(tool_responses)
+            yield from self.__call__(think_during_tool_calls) # 直到ai完成所有操作
     
-    def deal_function_call(self, tool_call, function_json, force=False):
-        name = tool_call["function"]["name"]
-        autorun = False
-        if name in self.safe_tools or force:
-            autorun = True
-        match name:
-            case "web_search":
-                if autorun:
-                    keyword = function_json["keyword"]
-                    result = self.web_search(keyword)
-                    if len(result) > 200:
-                        to_user = result[:200] + "..."
-                    else:
-                        to_user = result
-                    return {"ready": True, "content": result, "to_user": to_user}
-                else:
-                    return {"ready": False}
-            case "visit":
-                if autorun:
-                    try:
-                        number = int(function_json["content"])
-                        response_content = self.spider.get_page_content_with_id(number)
-                    except NameError:
-                        return {"ready": True, "content": "还没有搜索！"}
-                    except IndexError:
-                        return {"ready": True, "content": "没有搜索结果！"}
-                    except:
-                        try:
-                            if function_json["content"].startswith("http"):
-                                response_content = get_page_text_with_parser(function_json["content"])
-                            else:
-                                response_content = "访问搜索结果应输入数字！"
-                        except Exception as e:
-                            response_content = f"链接无法访问！\n{e}"
-                    if len(response_content) > 200:
-                        to_user = response_content[:200] + "..."
-                    else:
-                        to_user = response_content
-                    return {"ready": True, "content": response_content, "to_user": to_user}
-                else:
-                    return {"ready": False}
+    def _handle_tool_call(self, tool_call: dict):
+        tool_call_id = tool_call["id"]
+        try:
+            arguments_json = json.loads(tool_call["function"]["arguments"])
+            match tool_call["function"]["name"]:
+                case "readURL":
+                    content = API.read(url=arguments_json["url"])
+                case "searchWeb":
+                    response = API.search(query=arguments_json["query"])
+                    content = "\n".join([f"{item['title']}: {item['url']}" for item in response])
+                case "getNeteaseMusicInfo":
+                    content = API.ncm(id=arguments_json.get("id"), url=arguments_json.get("url"))
+                case "getBilibiliVideoInfo":
+                    content = API.bilibili(bv=arguments_json.get("bv"), url=arguments_json.get("url"))
+                case _:
+                    content = f"Error: Unknown function name: {tool_call['function']['name']}!"
+        except json.JSONDecodeError:
+            content = f"Error: Not a valid JSON string!"
+        return {
+            "role": "tool",
+            "content": content,
+            "tool_call_id": tool_call_id,
+        }
 
-    def web_search(self, keyword):
-        self.spider = BingSpider()
-        self.spider.search(keyword, pages=1, limit=5)
-        response_content = self.spider.formatted()
-        return response_content
-
-    def new(self):
-        self.messages.append({"role": "user", "content": []})
+    def _tool_call_json_parser(self, tool_call: dict):
+        try:
+            arguments_json = json.loads(tool_call["function"]["arguments"])
+        except json.JSONDecodeError:
+            return f"错误：不是一个有效的JSON字符串！"
+        match tool_call["function"]["name"]:
+            case "readURL":
+                return f"URL: {arguments_json['url']}"
+            case "searchWeb":
+                return f"查询: {arguments_json['query']}"
+            case "getNeteaseMusicInfo":
+                if "id" in arguments_json:
+                    return f"ID: {arguments_json['id']}"
+                elif "url" in arguments_json:
+                    return f"URL: {arguments_json['url']}"
+                else:
+                    return f"错误：getNeteaseMusicInfo函数必须提供id或url参数！"
+            case "getBilibiliVideoInfo":
+                if "bv" in arguments_json:
+                    return f"BV: {arguments_json['bv']}"
+                elif "url" in arguments_json:
+                    return f"URL: {arguments_json['url']}"
+                else:
+                    return f"错误：getBilibiliVideoInfo函数必须提供bv或url参数！"
+            case _:
+                return f"错误：未知的函数名：{tool_call['function']['name']}！"
     
     def add(self, content: dict):
+        if not self.messages or self.messages[-1]["role"] != "user":
+            self.messages.append({"role": "user", "content": []})
         self.messages[-1]["content"].append(content)
+        self.merge()
+        if not self.contain_image and content["type"] == "image_url":
+            self.contain_image = True
+            self.model = self.vision_model
+            self.oclient = Utils.oclient(self.model)
     
-    def cut(self):
-        """截断对话记录，保留最近的length条消息"""
-        # 提前计算必要的变量，避免重复计算
-        msg_count = len(self.messages)
-        
-        # 如果当前消息数量小于等于保留长度，无需截断
-        if self.length >= msg_count:
-            return
-        
-        # 计算消息内容的字符长度（只计算一次）
-        msg_str_length = len(str(self.messages))
-        
-        def _remove_non_user_messages(start_idx, end_condition):
-            """移除非用户发起的消息，直到遇到user角色或满足终止条件"""
-            current_idx = start_idx
-            while not end_condition(current_idx):
-                self.messages.pop(current_idx)
-                # 每次pop后重新计算字符长度
-                nonlocal msg_str_length
-                msg_str_length = len(str(self.messages))
-        
-        # 处理包含system消息的情况
-        if self.messages[0]["role"] == "system":
-            # 保留system消息 + 最近的length-1条消息
-            self.messages = [self.messages[0]] + self.messages[-(self.length-1):]
-            
-            # 定义终止条件：第一条非system消息是user 或 只剩2条消息 或 字符长度达标
-            def system_end_condition(idx):
-                return (self.messages[idx]["role"] == "user" 
-                        or len(self.messages) <= 2 
-                        or msg_str_length <= self.max_save_words)
-            
-            _remove_non_user_messages(1, system_end_condition)
-        
-        # 处理无system消息的情况
-        else:
-            # 保留最近的length条消息
-            self.messages = self.messages[-self.length:]
-            
-            # 定义终止条件：第一条消息是user 或 只剩1条消息 或 字符长度达标
-            def normal_end_condition(idx):
-                return (self.messages[idx]["role"] == "user" 
-                        or len(self.messages) <= 1 
-                        or msg_str_length <= self.max_save_words)
-            
-            _remove_non_user_messages(0, normal_end_condition)
-
-    def _check_if_cut(self):
-        """检查是否需要截断对话记录"""
-        # 提前计算，避免重复调用len()
-        msg_count = len(self.messages)
-        # 只在必要时计算字符串长度（这是高开销操作）
-        need_cut = (msg_count > self.to_cut_length)
-        if not need_cut and self.max_save_words > 0:
-            need_cut = len(str(self.messages)) > self.max_save_words
-        
-        if need_cut:
-            self.cut()
+    def set(self, content: list[dict]):
+        self.messages[-1]["content"] = content
+        if not self.contain_image and content[0]["type"] == "image_url":
+            self.contain_image = True
+            self.model = self.vision_model
+            self.oclient = Utils.oclient(self.model)
+    
+    def merge(self):
+        """
+        合并连续的文本消息
+        """
+        text_messages = []
+        image_messages = []
+        for message in self.messages[-1]["content"]:
+            if message["type"] == "text":
+                text_messages.append(message)
+            else:
+                image_messages.append(message)
+        self.messages[-1]["content"] = image_messages + [{"type": "text", "text": "\n\n".join([i["text"] for i in text_messages])}]

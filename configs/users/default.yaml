@@ -1,1 +1,30 @@
 MODEL: deepseek-chat # 默认模型
+VISION_MODEL: qwen3.5-plus
+ENABLE_COMMAND_DEFAULT: False
+ENABLE_THINKING_DEFAULT: False
+
+COMMAND_CHECK_PROMPT: |-
+  # 角色
+  意图分类器。分析输入，仅输出JSON。当指令未知，留空。
+
+  # 输出格式
+  - ["command1", "command2"]
+
+  # 指令
+  clear: 清除聊天记录/开启新聊天
+  enable_function: 开启函数/工具调用
+  disable_function: 关闭函数/工具调用
+  enable_thinking: 开启思考模式
+  disable_thinking: 关闭思考模式
+
+COMMAND_OUTPUT_MAPPING:
+  clear: 聊天记录已清除
+  enable_function: 已开启函数调用
+  disable_function: 已关闭函数调用
+  enable_thinking: 已开启思考模式
+  disable_thinking: 已关闭思考模式
+  unknown: |-
+    可用指令：
+    清除聊天记录
+    开启/关闭函数调用
+    开启/关闭思考模式
