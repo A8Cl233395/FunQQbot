@@ -9,3 +9,4 @@ configs/**
 !configs/users/default.yaml
 !configs/users/default.py
 !configs/base-template.yaml
+jobs.sqlite

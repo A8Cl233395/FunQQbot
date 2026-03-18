@@ -1,7 +1,14 @@
 import base64
 from collections import OrderedDict
+from queue import Queue
 from openai import OpenAI
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+from apscheduler.triggers.cron import CronTrigger
+import asyncio
+from PIL import Image
+from io import BytesIO
+import re
 from base_settings import *
 
 class LRUCache:
@@ -160,10 +167,56 @@ class Utils:
         return Utils.oclients[url]
     
     @staticmethod
-    def url_to_b64(url: str) -> str:
+    def url_to_b64(url: str, compress: int = 80, max_width: int = 1024, max_height: int = 1024) -> str:
         response = requests.get(url)
-        print(response.status_code)
-        return base64.b64encode(response.content).decode("utf-8")
+        # 如果不压缩或compress为None，且不缩放，直接返回原图
+        if (compress is None or not compress) and max_width is None and max_height is None:
+            return base64.b64encode(response.content).decode("utf-8")
+        try:
+            img = Image.open(BytesIO(response.content))
+            if max_width is not None or max_height is not None:
+                original_width, original_height = img.size
+                if max_width and max_height:
+                    width_ratio = max_width / original_width
+                    height_ratio = max_height / original_height
+                    ratio = min(width_ratio, height_ratio)
+                elif max_width:
+                    ratio = max_width / original_width
+                elif max_height:
+                    ratio = max_height / original_height
+                else:
+                    ratio = 1.0
+                if ratio < 1.0:
+                    new_width = int(original_width * ratio)
+                    new_height = int(original_height * ratio)
+                    img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            if img.mode in ('RGBA', 'P'):
+                img = img.convert('RGB')
+            output_buffer = BytesIO()
+            img.save(output_buffer, format="JPEG", quality=compress, optimize=True)
+            processed_data = output_buffer.getvalue()
+            return base64.b64encode(processed_data).decode("utf-8")
+        except Exception as e:
+            print(f"图片处理失败，返回原图: {e}")
+            return base64.b64encode(response.content).decode("utf-8")
+    
+    @staticmethod
+    def customize_reader(url):
+        domain_regex = r"^(?:https?:)?(?:\/\/)?([^\/\?:]+)(?:[\/\?:].*)?$"
+        domain = re.search(domain_regex, url).group(1)
+        try:
+            match domain:
+                case "music.163.com":
+                    song_id = re.search(r"id=(\d+)", url).group(1)
+                    return API.ncm(id=song_id)
+                case "163cn.tv":
+                    return API.ncm(url=url)
+                case "b23.tv" | "bilibili.com" | "www.bilibili.com":
+                    return API.bilibili(url=url)
+                case _:
+                    return API.read(url=url)
+        except:
+            return API.read(url=url)
 
 class Bigmodel:
     @staticmethod
@@ -191,33 +244,37 @@ class Bigmodel:
         )
         return response.choices[0].message.content
 
-class GScheduler:
-    scheduler: BackgroundScheduler = BackgroundScheduler()
-
-    @classmethod
-    def manage(cls, func):
-        def wrapper(*args, **kwargs):
-            result = func(*args, **kwargs)
-            if not cls.scheduler.get_jobs():
-                cls.scheduler.shutdown()
-            else:
-                if not cls.scheduler.running:
-                    cls.scheduler.start()
-            return result
-        return wrapper
-
 class Scheduler:
-    def __init__(self):
-        self.jobs = {}
+    scheduler = BackgroundScheduler(jobstores = {'default': SQLAlchemyJobStore(url='sqlite:///jobs.sqlite')})
     
-    @GScheduler.manage
-    def add_job(self, func, trigger, **kwargs):
-        job = GScheduler.scheduler.add_job(func, trigger, **kwargs)
-        self.jobs[job.id] = job
-        return job
+    @classmethod
+    def add_job(cls, func, trigger: tuple, args: tuple):
+        if trigger[0] == "cron":
+            cron = CronTrigger.from_crontab(trigger[1])
+            id = cls.scheduler.add_job(func, cron, args=args).id
+        elif trigger[0] == "date":
+            id = cls.scheduler.add_job(func, trigger[0], run_date=trigger[1], args=args).id
+        else:
+            id = None
+        return id
     
-    @GScheduler.manage
-    def remove_job(self, job_id):
-        if job_id in self.jobs:
-            GScheduler.scheduler.remove_job(job_id)
-            del self.jobs[job_id]
+    @classmethod
+    def remove_job(cls, id: str):
+        cls.scheduler.remove_job(id)
+    
+    @classmethod
+    def refresh_jobs(cls, jobs: dict):
+        to_delete = []
+        for job_name in jobs:
+            if cls.scheduler.get_job(jobs[job_name]["id"]) is None:
+                to_delete.append(job_name)
+        for job_name in to_delete:
+            del jobs[job_name]
+    
+    @classmethod
+    def start(cls):
+        cls.scheduler.start()
+    
+    @classmethod
+    def shutdown(cls):
+        cls.scheduler.shutdown()

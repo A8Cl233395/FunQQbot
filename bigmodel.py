@@ -1,7 +1,47 @@
 from custom_functions import *
 import json
+import threading
+import sys
+import time
+from datetime import datetime
 
 class ChatInstance:
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "searchWeb",
+                "description": "在互联网上搜索指定的查询",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "description": "要搜索的查询字符串",
+                            "type": "string",
+                        },
+                    },
+                    "required": ["query"]
+                },
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "readURL",
+                "description": "从互联网上读取指定URL的内容",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "description": "要访问的网页的URL",
+                            "type": "string",
+                        },
+                    },
+                    "required": ["url"]
+                },
+            },
+        },
+    ]
     def __init__(self, model = "deepseek-chat", vision_model = "qwen3-vl-plus-2025-12-19", messages: list[dict] | None = None, thinking: bool = False, enable_function: bool = False):
         self.oclient = Utils.oclient(model)
         self.model = model
@@ -21,104 +61,14 @@ class ChatInstance:
                 elif message['role'] == 'tool':
                     self.enable_function = True
 
-        self.tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "searchWeb",
-                    "description": "在互联网上搜索指定的查询",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "description": "要搜索的查询字符串",
-                                "type": "string",
-                            },
-                        },
-                        "required": ["query"]
-                    },
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "readURL",
-                    "description": "从互联网上读取指定URL的内容",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "url": {
-                                "description": "要访问的网页的URL",
-                                "type": "string",
-                            },
-                        },
-                        "required": ["url"]
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "GetNeteaseMusicInfo",
-                    "description": "获取网易云音乐歌曲的歌词、作者和热门评论。需要提供链接或ID之一。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "id": {
-                                "description": "网易云音乐歌曲的ID。推荐使用。",
-                                "type": "string",
-                            },
-                            "url": {
-                                "description": "网易云音乐歌曲的链接。",
-                                "type": "string",
-                            }
-                        },
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "getBilibiliVideoInfo",
-                    "description": "获取B站视频的字幕、上传者和标签信息。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "bv": {
-                                "description": "视频的BV号。推荐使用。",
-                                "type": "string",
-                            },
-                            "url": {
-                                "description": "视频的链接。",
-                                "type": "string",
-                            }
-                        },
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "getRandomPicture",
-                    "description": "获取随机图片。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                        },
-                    },
-                },
-            },
-        ]
-
     def ai(self):
-        print(self.messages)
         params = {
             "model": self.model,
             "messages": self.messages,
             "stream": True
         }
         if self.enable_function:
-            params["tools"] = self.tools
+            params["tools"] = ChatInstance.tools
         if MODELS[self.model].get("default-thinking") is not None and self.thinking != MODELS[self.model]["default-thinking"]:
             if self.thinking:
                 params["extra_body"] = MODELS[self.model]["thinking-toggle-extra-body"]["true"]
@@ -127,7 +77,7 @@ class ChatInstance:
         completion = self.oclient.chat.completions.create(**params)
         return completion
 
-    def __call__(self, think_during_tool_calls=False, cut: int=50):
+    def __call__(self, think_during_tool_calls=False):
         completion = self.ai()
         answering_content = ""
         reasoning_content = ""
@@ -172,8 +122,6 @@ class ChatInstance:
                             yield self._tool_call_json_parser(tool_calls[-1])
                             # TODO: 懒得优化了，卡着
                             tool_responses.append(self._handle_tool_call(tool_calls[-1]))
-                            yield "---Tool Response---"
-                            yield tool_responses[-1]["content"] if len(tool_responses[-1]["content"]) <= cut else tool_responses[-1]["content"][:cut] + "..."
                         tool_calls.append({
                             "id": tool_call.id,
                             "function": {
@@ -202,8 +150,6 @@ class ChatInstance:
             # 处理最后一个tool call
             yield self._tool_call_json_parser(tool_calls[-1])
             tool_responses.append(self._handle_tool_call(tool_calls[-1]))
-            yield "---Tool Response---"
-            yield tool_responses[-1]["content"] if len(tool_responses[-1]["content"]) <= cut else tool_responses[-1]["content"][:cut] + "..."
             self.messages.append({"role": "assistant", "content": answering_content, "tool_calls": tool_calls})
             if is_thinking and MODELS[self.model].get("think-during-tool-calls", False):
                 self.messages[-1]["reasoning_content"] = reasoning_content
@@ -221,10 +167,6 @@ class ChatInstance:
                 case "searchWeb":
                     response = API.search(query=arguments_json["query"])
                     content = "\n".join([f"{item['title']}: {item['url']}" for item in response])
-                case "getNeteaseMusicInfo":
-                    content = API.ncm(id=arguments_json.get("id"), url=arguments_json.get("url"))
-                case "getBilibiliVideoInfo":
-                    content = API.bilibili(bv=arguments_json.get("bv"), url=arguments_json.get("url"))
                 case _:
                     content = f"Error: Unknown function name: {tool_call['function']['name']}!"
         except json.JSONDecodeError:
@@ -245,20 +187,6 @@ class ChatInstance:
                 return f"URL: {arguments_json['url']}"
             case "searchWeb":
                 return f"查询: {arguments_json['query']}"
-            case "getNeteaseMusicInfo":
-                if "id" in arguments_json:
-                    return f"ID: {arguments_json['id']}"
-                elif "url" in arguments_json:
-                    return f"URL: {arguments_json['url']}"
-                else:
-                    return f"错误：getNeteaseMusicInfo函数必须提供id或url参数！"
-            case "getBilibiliVideoInfo":
-                if "bv" in arguments_json:
-                    return f"BV: {arguments_json['bv']}"
-                elif "url" in arguments_json:
-                    return f"URL: {arguments_json['url']}"
-                else:
-                    return f"错误：getBilibiliVideoInfo函数必须提供bv或url参数！"
             case _:
                 return f"错误：未知的函数名：{tool_call['function']['name']}！"
     
@@ -291,3 +219,316 @@ class ChatInstance:
             else:
                 image_messages.append(message)
         self.messages[-1]["content"] = image_messages + [{"type": "text", "text": "\n\n".join([i["text"] for i in text_messages])}]
+
+class UserChat(ChatInstance):
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "searchWeb",
+                "description": "在互联网上搜索指定的内容。只在需要最新信息时使用",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "description": "要搜索的内容",
+                            "type": "string",
+                        },
+                    },
+                    "required": ["query"]
+                },
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "readURL",
+                "description": "读取链接的内容",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "description": "要访问的URL",
+                            "type": "string",
+                        },
+                    },
+                    "required": ["url"]
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "createTask",
+                "description": "创建/替换一个任务。任务会调用AI并发送结果",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "description": "任务名称，唯一",
+                            "type": "string",
+                        },
+                        "trigger": {
+                            "description": "任务触发方式，需要date或cron参数",
+                            "type": "string",
+                            "enum": ["date", "cron"],
+                        },
+                        "schedule": {
+                            "anyOf": [
+                                {
+                                    "description": "date任务触发日期，格式为YYYY-MM-DDTHH:MM:SS",
+                                    "type": "string",
+                                },
+                                {
+                                    "description": "cron任务触发表达式，5个字段",
+                                    "type": "string",
+                                }
+                            ]
+                        },
+                        "description": {
+                            "description": "任务描述，详细说明任务的具体内容、目的、执行细节等。",
+                            "type": "string",
+                        },
+                    },
+                    "required": ["name", "trigger", "schedule", "description"]
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "removeTask",
+                "description": "删除一个任务",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "description": "要删除的任务名称",
+                            "type": "string",
+                        },
+                    },
+                    "required": ["name"]
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "addMemory",
+                "description": "添加一条记忆。在用户指定或你认为需要记忆的时候使用",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "memory": {
+                            "description": "要添加的记忆内容（不包含时间戳）",
+                            "type": "string",
+                        },
+                    },
+                    "required": ["memory"]
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "removeMemory",
+                "description": "删除一条记忆",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "memory": {
+                            "description": "要删除的记忆内容，内容必须完全匹配（含时间戳）",
+                            "type": "string",
+                        },
+                    },
+                    "required": ["memory"]
+                },
+            },
+        }
+    ]
+    def __init__(self, model: str, vision_model: str, prompt_raw: str, user_id: int, data: dict):
+        self.tasks: dict[str, dict] = data["tasks"]
+        self.memory: list[str] = data["memory"]
+        self.enable_function: bool = data["enable_function"]
+        self.thinking: bool = data["thinking"]
+        self.prompt_raw = prompt_raw
+        self.oclient = Utils.oclient(model)
+        self.model: str = model
+        self.vision_model: str = vision_model
+        self.user_id: int = user_id
+        self.clear()
+        self.contain_image = False
+    
+    def clear(self):
+        self.messages = [{"role": "system", "content": self.prompt_raw.format(memory_block="\n".join(self.memory or ["暂无记忆"]), task_block="\n".join([f"[{task_name}]: {self.tasks[task_name]['trigger']} {self.tasks[task_name]['schedule']}" for task_name in self.tasks] or ["暂无任务"]), device="QQ（减少使用复杂的表格、LaTeX等，多使用纯文本）", time=datetime.now().strftime("%Y-%m-%d %H:%M"))}]
+        Scheduler.refresh_jobs(self.tasks)
+
+    def ai(self):
+        params = {
+            "model": self.model,
+            "messages": self.messages,
+            "stream": True
+        }
+        if self.enable_function:
+            params["tools"] = UserChat.tools
+        if MODELS[self.model].get("default-thinking") is not None and self.thinking != MODELS[self.model]["default-thinking"]:
+            if self.thinking:
+                params["extra_body"] = MODELS[self.model]["thinking-toggle-extra-body"]["true"]
+            else:
+                params["extra_body"] = MODELS[self.model]["thinking-toggle-extra-body"]["false"]
+        completion = self.oclient.chat.completions.create(**params)
+        return completion
+    
+    def _handle_tool_call(self, tool_call: dict):
+        tool_call_id = tool_call["id"]
+        try:
+            arguments_json = json.loads(tool_call["function"]["arguments"])
+            match tool_call["function"]["name"]:
+                case "readURL":
+                    content = Utils.customize_reader(arguments_json["url"])
+                case "searchWeb":
+                    response = API.search(query=arguments_json["query"])
+                    content = "\n".join([f"{item['title']}: {item['url']}" for item in response])
+                case "createTask":
+                    try:
+                        id = Scheduler.add_job(UserChat.do_task, (arguments_json["trigger"], arguments_json["schedule"]), (self.user_id, (arguments_json["name"], arguments_json["description"])))
+                        self.tasks[arguments_json["name"]] = {"id": id, "trigger": arguments_json["trigger"], "schedule": arguments_json["schedule"]}
+                        content = f"任务 {arguments_json['name']} 已创建！"
+                    except Exception as e:
+                        content = f"任务 {arguments_json['name']} 创建失败！错误信息：{str(e)}"
+                case "removeTask":
+                    try:
+                        Scheduler.remove_job(self.tasks[arguments_json["name"]]["id"])
+                        content = f"任务 {arguments_json['name']} 已删除！"
+                    except Exception as e:
+                        content = f"任务 {arguments_json['name']} 删除失败！错误信息：{str(e)}"
+                case "addMemory":
+                    mem = f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] {arguments_json['memory']}"
+                    self.memory.append(mem)
+                    content = f"记忆 {mem} 已添加！"
+                case "removeMemory":
+                    try:
+                        self.memory.remove(arguments_json["memory"])
+                        content = f"记忆 {arguments_json['memory']} 已删除！"
+                    except ValueError:
+                        content = f"记忆 {arguments_json['memory']} 不存在！"
+                case _:
+                    content = f"Error: Unknown function name: {tool_call['function']['name']}!"
+        except json.JSONDecodeError:
+            content = f"Error: Not a valid JSON string!"
+        return {
+            "role": "tool",
+            "content": content,
+            "tool_call_id": tool_call_id,
+        }
+    
+    def _tool_call_json_parser(self, tool_call: dict):
+        try:
+            arguments_json = json.loads(tool_call["function"]["arguments"])
+        except json.JSONDecodeError:
+            return f"错误：不是一个有效的JSON字符串！"
+        match tool_call["function"]["name"]:
+            case "readURL":
+                return f"URL: {arguments_json['url']}"
+            case "searchWeb":
+                return f"查询: {arguments_json['query']}"
+            case "createTask":
+                return f"任务名称: {arguments_json['name']}\n触发方式: {arguments_json['trigger']}\n计划时间: {arguments_json['schedule']}\n任务描述: \n{arguments_json['description']}"
+            case "removeTask":
+                return f"任务名称: {arguments_json['name']}"
+            case "addMemory":
+                return f"记忆: {arguments_json['memory']}"
+            case "removeMemory":
+                return f"记忆: {arguments_json['memory']}"
+            case _:
+                return f"错误：未知的函数名：{tool_call['function']['name']}！"
+    
+    @property
+    def data(self):
+        return {
+            "tasks": self.tasks,
+            "memory": self.memory,
+            "enable_function": self.enable_function,
+            "thinking": self.thinking,
+        }
+    
+    @staticmethod
+    def do_task(user_id, task_detail: tuple): # TODO: WHAT THE FUCK IS THIS ?
+        main_module = sys.modules['__main__']
+        _users = main_module.users
+        _user_locks = main_module.user_locks
+        _user_last_input_time = main_module.user_last_input_time
+        
+        if user_id not in _users: # init
+            _user_locks[user_id] = threading.Lock()
+            _users[user_id] = main_module.Handle_private_message(user_id)
+            _user_last_input_time[user_id] = time.time()
+        with _user_locks[user_id]:
+            task = TaskInstance(_users[user_id].model, _users[user_id].task_prompt_raw, True)
+            task.add({"type": "text", "text": f"任务：{task_detail[0]}\n任务描述: \n{task_detail[1]}"})
+            response = task()
+            _users[user_id].send_message(f"[任务 {task_detail[0]}]\n{response}")
+
+class TaskInstance:
+    def __init__(self, model: str, task_prompt_raw: str, thinking: bool):
+        task_prompt = task_prompt_raw.format(time=datetime.now().strftime("%Y-%m-%d %H:%M"), device="QQ（减少使用复杂的表格、LaTeX等，多使用纯文本）")
+        self.oclient = Utils.oclient(model)
+        self.model = model
+        self.messages: list[dict] = [{"role": "system", "content": task_prompt}]
+        self.thinking = thinking
+    
+    def ai(self):
+        params = {
+            "model": self.model,
+            "messages": self.messages,
+            "stream": False,
+            "tools": ChatInstance.tools,
+        }
+        if MODELS[self.model].get("default-thinking") is not None and self.thinking != MODELS[self.model]["default-thinking"]:
+            if self.thinking:
+                params["extra_body"] = MODELS[self.model]["thinking-toggle-extra-body"]["true"]
+            else:
+                params["extra_body"] = MODELS[self.model]["thinking-toggle-extra-body"]["false"]
+        completion = self.oclient.chat.completions.create(**params)
+        return completion.choices[0].message
+    
+    def __call__(self, think_during_tool_calls=False):
+        message = self.ai()
+        tool_responses = []
+        if hasattr(message, "tool_calls") and message.tool_calls:
+            for tool_call in message.tool_calls:
+                tool_responses.append(self._handle_tool_call(tool_call))
+            if think_during_tool_calls or hasattr(message, "reasoning_content") and message.reasoning_content and MODELS[self.model].get("think-during-tool-calls", False):
+                think_during_tool_calls = True
+                self.messages.append({"role": "assistant", "content": message.content, "tool_calls": message.tool_calls, "reasoning_content": message.reasoning_content})
+            else:
+                self.messages.append({"role": "assistant", "content": message.content, "tool_calls": message.tool_calls})
+            self.messages.extend(tool_responses)
+            return self.__call__(think_during_tool_calls)
+        else:
+            return message.content
+    
+    def _handle_tool_call(self, tool_call: dict):
+        tool_call_id = tool_call.id
+        try:
+            arguments_json = json.loads(tool_call.function.arguments)
+            match tool_call.function.name:
+                case "readURL":
+                    content = API.read(url=arguments_json["url"])
+                case "searchWeb":
+                    response = API.search(query=arguments_json["query"])
+                    content = "\n".join([f"{item['title']}: {item['url']}" for item in response])
+                case _:
+                    content = f"Error: Unknown function name: {tool_call['function']['name']}!"
+        except json.JSONDecodeError:
+            content = f"Error: Not a valid JSON string!"
+        return {
+            "role": "tool",
+            "content": content,
+            "tool_call_id": tool_call_id,
+        }
+
+    def add(self, content: dict):
+        if not self.messages or self.messages[-1]["role"] != "user":
+            self.messages.append({"role": "user", "content": []})
+        self.messages[-1]["content"].append(content)

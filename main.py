@@ -1,10 +1,5 @@
-import asyncio
 import websockets
 import importlib
-import threading
-import time
-import re
-from queue import Queue
 from types import ModuleType
 from bigmodel import *
 
@@ -55,7 +50,9 @@ class Handle_group_message:
 
     def send_message(self, message):
         """发送群消息"""
-        if message:
+        if f"{message}" == "":
+            pass
+        else:
             data = json.dumps({
                 "action": "send_group_msg",
                 "params": {
@@ -198,14 +195,15 @@ async def main():
     pusher = threading.Thread(target=push_to_websocket, daemon=True)
     pusher.start()
     print("WebSocket服务器已在 ws://0.0.0.0:8080 启动，等待连接...")
-
+    Scheduler.start()
     try:
         # 使用 await asyncio.Future() 来让服务器永久运行，直到被中断
         await asyncio.Future()  
     finally:
         # 在程序结束时（例如按下 Ctrl+C），清理资源
-        print("\n正在关闭服务器...")
+        print("正在关闭服务器...")
         server.close()
+        Scheduler.shutdown()
         print("服务器已关闭。")
         print("正在保存所有用户和群的状态...")
         for group_id in groups:
@@ -213,7 +211,7 @@ async def main():
         for user_id in users:
             users[user_id].on_quit()
         print("保存完成。")
-        exit(0)
+        os._exit(0)
 
 if __name__ == "__main__":
     # 使用 asyncio.run() 来启动主异步函数
