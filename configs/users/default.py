@@ -1,4 +1,3 @@
-import __main__
 from main import *
 
 def hook_init(self: "Handle_private_message", config: dict):
@@ -172,8 +171,7 @@ def messages_to_text(data) -> tuple[str, str]:
                 output_text += f"\n```markdown\n{message['data']['content']}\n```"
             case _:
                 output_text += f"\n<未知>"
-                print("发生错误")
-                print(message)
-                print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+                logger.error("发生错误")
+                logger.error("%s", message)
     output_text = output_text.strip()
     return username + ": " + output_text, output_text

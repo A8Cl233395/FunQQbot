@@ -48,3 +48,5 @@ MODELS:
       'true':
         enable_thinking: true
     url: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+LOG_LEVEL: INFO # 日志级别（DEBUG, INFO, WARNING, ERROR, CRITICAL）

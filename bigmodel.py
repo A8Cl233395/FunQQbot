@@ -391,6 +391,8 @@ class UserChat(ChatInstance):
                     content = "\n".join([f"{item['title']}: {item['url']}" for item in response])
                 case "createTask":
                     try:
+                        if arguments_json["name"] in self.tasks:
+                            Scheduler.remove_job(self.tasks[arguments_json["name"]]["id"])
                         id = Scheduler.add_job(UserChat.do_task, (arguments_json["trigger"], arguments_json["schedule"]), (self.user_id, (arguments_json["name"], arguments_json["description"])))
                         self.tasks[arguments_json["name"]] = {"id": id, "trigger": arguments_json["trigger"], "schedule": arguments_json["schedule"]}
                         content = f"任务 {arguments_json['name']} 已创建！"

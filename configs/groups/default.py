@@ -28,7 +28,7 @@ def hook_on_message_receive(self: Handle_group_message, messages):
     if self.delete:
         self.stored_messages = self.stored_messages[-self.max_history:]
     elif len(self.stored_messages) > self.extended_max_history:
-        print(f"群 {self.group_id} 聊天记录超过 {self.extended_max_history} 条，清理到 {self.max_history} 条")
+        logger.info("群 %s 聊天记录超过 %s 条，清理到 %s 条", self.group_id, self.extended_max_history, self.max_history)
         self.delete = True
         self.stored_messages = self.stored_messages[-self.max_history:]
     text, plain_text, is_mentioned = messages_to_text(messages, self.name)
@@ -122,9 +122,8 @@ def messages_to_text(data, self_name) -> tuple[str, str, bool]:
                 output_text += f"\n```markdown\n{message['data']['content']}\n```"
             case _:
                 output_text += f"\n<未知>"
-                print("发生错误")
-                print(message)
-                print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+                logger.error("发生错误")
+                logger.error("%s", message)
         last_type = message["type"]
     output_text = output_text.strip()
     return username + ": " + output_text, output_text, is_mentioned

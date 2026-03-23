@@ -197,7 +197,7 @@ class Utils:
             processed_data = output_buffer.getvalue()
             return base64.b64encode(processed_data).decode("utf-8")
         except Exception as e:
-            print(f"图片处理失败，返回原图: {e}")
+            logger.warning("图片处理失败，返回原图: %s", e)
             return base64.b64encode(response.content).decode("utf-8")
     
     @staticmethod
