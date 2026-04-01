@@ -1,4 +1,4 @@
-from main import *
+from handlers import *
 
 def hook_init(self: Handle_group_message, config: dict):
     # self.config # 当前群组配置 dict

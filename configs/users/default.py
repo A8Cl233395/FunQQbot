@@ -1,24 +1,31 @@
-from main import *
+from user_functions import *
 
 def hook_init(self: "Handle_private_message", config: dict):
     # self.config # 当前用户配置 dict
-    self.model = config["MODEL"]
-    self.vision_model = config["VISION_MODEL"]
     self.command_check_prompt = config["COMMAND_CHECK_PROMPT"]
     self.command_output_mapping = config["COMMAND_OUTPUT_MAPPING"]
-    self.prompt_raw = config["CHAT_PROMPT_RAW"]
-    self.task_prompt_raw = config["TASK_PROMPT_RAW"]
     if not os.path.exists(f"configs/users/{self.user_id}.json"):
-        self.data = {
+        data = {
             "thinking": config["ENABLE_THINKING_DEFAULT"],
             "enable_function": config["ENABLE_COMMAND_DEFAULT"],
+            "tasks": {},
             "memory": [],
-            "tasks": {}
         }
     else:
         with open(f"configs/users/{self.user_id}.json", "r", encoding="utf-8") as f:
-            self.data = json.load(f)
-    self.chat_instance = UserChat(self.model, self.vision_model, self.prompt_raw, self.user_id, self.data)
+            data = json.load(f)
+    self.user_data = UserData(
+        user_id=self.user_id,
+        model=config["MODEL"],
+        vision_model=config["VISION_MODEL"],
+        tasks=data["tasks"],
+        memory=data["memory"],
+        thinking=data["thinking"],
+        enable_function=data["enable_function"],
+        prompt_raw=config["CHAT_PROMPT_RAW"],
+        task_prompt_raw=config["TASK_PROMPT_RAW"],
+    )
+    self.chat_instance = UserChat(self.user_data)
     self.last_message_time = time.time()
 
 def hook_on_message_receive(self: Handle_private_message, messages):
@@ -37,19 +44,20 @@ def hook_on_message_receive(self: Handle_private_message, messages):
                             self.chat_instance.clear()
                             self.send_message(self.command_output_mapping[command])
                         case "enable_function":
-                            self.chat_instance.enable_function = True
+                            self.user_data.enable_function = True
                             self.send_message(self.command_output_mapping[command])
                         case "disable_function":
-                            self.chat_instance.enable_function = False
+                            self.user_data.enable_function = False
                             self.send_message(self.command_output_mapping[command])
                         case "enable_thinking":
-                            self.chat_instance.thinking = True
+                            self.user_data.thinking = True
                             self.send_message(self.command_output_mapping[command])
                         case "disable_thinking":
-                            self.chat_instance.thinking = False
+                            self.user_data.thinking = False
                             self.send_message(self.command_output_mapping[command])
                         case _:
                             self.send_message(self.command_output_mapping["unknown"])
+                            break
         except json.JSONDecodeError:
             self.send_message("指令内容包含提示词注入")
     else:
@@ -65,7 +73,7 @@ def hook_on_input(self: Handle_private_message):
 def hook_on_quit(self: Handle_private_message):
     # self.config # 当前用户配置 dict
     with open(f"configs/users/{self.user_id}.json", "w", encoding="utf-8") as f:
-        json.dump(self.chat_instance.data, f, ensure_ascii=False)
+        json.dump({"thinking": self.user_data.thinking, "enable_function": self.user_data.enable_function, "tasks": self.user_data.tasks, "memory": self.user_data.memory}, f, ensure_ascii=False)
 
 def chat(self: Handle_private_message, messages):
     contains_text = False

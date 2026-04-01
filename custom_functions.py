@@ -1,6 +1,5 @@
 import base64
 from collections import OrderedDict
-from queue import Queue
 from openai import OpenAI
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
@@ -8,7 +7,11 @@ from apscheduler.triggers.cron import CronTrigger
 import asyncio
 from PIL import Image
 from io import BytesIO
+import json
+import websockets
 import re
+import sys
+from dataclasses import dataclass
 from base_settings import *
 
 class LRUCache:
@@ -81,7 +84,7 @@ class API:
     @staticmethod
     def search(query: str) -> str:
         response = requests.get(f"{API.api}/search", headers={"key": API.key}, params={"q": query})
-        return response.json()
+        return response.text
     
     @staticmethod
     def read(url: str) -> str:
@@ -135,6 +138,11 @@ class API:
     def _ncm_url(url: str) -> str:
         response = requests.get(f"{API.api}/ncmlyric", headers={"key": API.key}, params={"url": url})
         return response.text
+    
+    @staticmethod
+    def get_userdata(user_id: str) -> dict:
+        response = requests.get(f"{API.api}/userdata", headers={"key": API.key}, params={"uid": user_id}).json()
+        return response
 
 class NapcatAPI:
     username_cache = LRUCache(128)
@@ -160,7 +168,7 @@ class Utils:
     oclients = {}
 
     @staticmethod
-    def oclient(model):
+    def oclient(model) -> OpenAI:
         url = MODELS[model]["url"]
         if url not in Utils.oclients:
             Utils.oclients[url] = OpenAI(api_key=MODELS[model]["api_key"], base_url=MODELS[model]["url"])
@@ -244,37 +252,14 @@ class Bigmodel:
         )
         return response.choices[0].message.content
 
-class Scheduler:
-    scheduler = BackgroundScheduler(jobstores = {'default': SQLAlchemyJobStore(url='sqlite:///jobs.sqlite')})
-    
-    @classmethod
-    def add_job(cls, func, trigger: tuple, args: tuple):
-        if trigger[0] == "cron":
-            cron = CronTrigger.from_crontab(trigger[1])
-            id = cls.scheduler.add_job(func, cron, args=args).id
-        elif trigger[0] == "date":
-            id = cls.scheduler.add_job(func, trigger[0], run_date=trigger[1], args=args).id
-        else:
-            id = None
-        return id
-    
-    @classmethod
-    def remove_job(cls, id: str):
-        cls.scheduler.remove_job(id)
-    
-    @classmethod
-    def refresh_jobs(cls, jobs: dict):
-        to_delete = []
-        for job_name in jobs:
-            if cls.scheduler.get_job(jobs[job_name]["id"]) is None:
-                to_delete.append(job_name)
-        for job_name in to_delete:
-            del jobs[job_name]
-    
-    @classmethod
-    def start(cls):
-        cls.scheduler.start()
-    
-    @classmethod
-    def shutdown(cls):
-        cls.scheduler.shutdown()
+@dataclass
+class UserData:
+    user_id: int
+    model: str
+    vision_model: str
+    tasks: dict[str, dict]
+    memory: list[str]
+    thinking: bool
+    enable_function: bool
+    prompt_raw: str
+    task_prompt_raw: str

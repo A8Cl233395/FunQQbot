@@ -20,6 +20,7 @@ with open("configs/base.yaml", encoding="utf-8") as f:
     base_config = yaml.safe_load(f)
 del f
 REMOTE_API_URL: str = base_config["REMOTE_API_URL"]
+REMOTE_WEBSOCKET_URI: str = base_config["REMOTE_WEBSOCKET_URI"]
 REMOTE_API_KEY: str = base_config["REMOTE_API_KEY"]
 ENABLE_OCR: bool = base_config["ENABLE_OCR"]
 ENABLE_STT: bool = base_config["ENABLE_STT"]
@@ -38,6 +39,9 @@ try:
         logger.error("远程API服务错误！")
         exit(1)
     service_status = response.json()
+    if "version" not in service_status or service_status["version"] != "2":
+        logger.error("远程API服务版本不匹配！")
+        exit(1)
     if not service_status["ocr"] and ENABLE_OCR:
         logger.error("远程API OCR 功能未开启！")
         exit(1)
