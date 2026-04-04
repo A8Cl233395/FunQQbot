@@ -3,7 +3,7 @@ from apscheduler.triggers.date import DateTrigger
 
 from handlers import *
 
-class UserChat(ChatInstance):
+class UserChat:
     tools = [
         {
             "type": "function",
@@ -98,12 +98,12 @@ class UserChat(ChatInstance):
             "type": "function",
             "function": {
                 "name": "addMemory",
-                "description": "添加一条记忆。在用户指定或你认为需要记忆的时候使用",
+                "description": "添加一条记忆。在需要永久记住内容的时候使用",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "memory": {
-                            "description": "要添加的记忆内容（不包含时间戳）",
+                            "description": "要记住的内容（不包含时间戳）",
                             "type": "string",
                         },
                     },
@@ -137,7 +137,7 @@ class UserChat(ChatInstance):
     
     def clear(self):
         # HIGHWAY TO HELL
-        self.messages = [{"role": "system", "content": self.userdata.prompt_raw.format(memory_block="\n".join(self.userdata.memory or ["暂无记忆"]), task_block="\n".join([f"[{task_name}]: {self.userdata.tasks[task_name]['trigger']} {self.userdata.tasks[task_name]['schedule']}" for task_name in self.userdata.tasks] or ["暂无任务"]), device="QQ（减少使用复杂的表格、LaTeX等，多使用纯文本）", time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))}]
+        self.messages = [{"role": "system", "content": self.userdata.prompt_raw.format(memory_block="\n".join(self.userdata.memory or ["暂无记忆"]), task_block="\n".join([f"[{task_name}]: {self.userdata.tasks[task_name]['trigger']} {self.userdata.tasks[task_name]['schedule']}" for task_name in self.userdata.tasks] or ["暂无任务"]), device="QQ（减少使用复杂的表格、LaTeX等，多使用纯文本）", time=datetime.now().strftime("%Y-%m-%d %H:%M:%S %A"))}]
         self.contain_image = False
 
     def ai(self):
@@ -156,6 +156,86 @@ class UserChat(ChatInstance):
         client = self.vision_oclient if self.contain_image else self.oclient
         completion = client.chat.completions.create(**params)
         return completion
+
+    def __call__(self, think_during_tool_calls=False):
+        completion = self.ai()
+        answering_content = ""
+        reasoning_content = ""
+        buffer = ""
+        is_thinking = False
+        # is_answering = False
+        tool_calls = []
+        tool_responses = []
+        for chunk in completion:
+            delta = chunk.choices[0].delta
+            if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                if not is_thinking:
+                    is_thinking = True
+                    # yield "---Thinking---"
+                reasoning_content += delta.reasoning_content
+                # buffer += delta.reasoning_content
+                # if "\n\n" in buffer:
+                #     parts = buffer.split("\n\n", 1)
+                #     yield parts[0].strip()
+                #     buffer = parts[1].strip() if len(parts) > 1 else ""  # 双换行之后的内容（如果有）
+            elif hasattr(delta, "content") and delta.content:
+                # if not is_answering:
+                    # if buffer:
+                    #     yield buffer.strip()
+                    #     buffer = ""
+                    # if is_thinking:
+                    #     yield "---Answering---"
+                    # is_answering = True
+                answering_content += delta.content
+                buffer += delta.content
+                if "\n\n" in buffer:
+                    parts = buffer.split("\n\n", 1)
+                    yield parts[0].strip()
+                    buffer = parts[1].strip() if len(parts) > 1 else ""  # 双换行之后的内容（如果有）
+            elif hasattr(delta, "tool_calls") and delta.tool_calls:
+                if buffer:
+                    yield buffer.strip()
+                    buffer = ""
+                for tool_call in delta.tool_calls:
+                    if tool_call.id and tool_call.function.name: # 新的tool call
+                        if tool_calls: # 处理旧的（完成生成的）tool call
+                            yield self._tool_call_json_parser(tool_calls[-1])
+                            # TODO: 懒得优化了，卡着
+                            tool_responses.append(self._handle_tool_call(tool_calls[-1]))
+                        tool_calls.append({
+                            "id": tool_call.id,
+                            "function": {
+                                "arguments": "",
+                                "name": tool_call.function.name,
+                            },
+                            "type": "function",
+                        })
+                        yield f"---Tool Call: {tool_call.function.name}---" if tool_call.function.name else "---Tool Call---"
+                    if tool_call.function.arguments:
+                        if tool_call.index:
+                            tool_calls[tool_call.index]["function"]["arguments"] += tool_call.function.arguments
+                        else: # 兼容gemini。gemini只有一个tool call并且index = None
+                            tool_calls[-1]["function"]["arguments"] += tool_call.function.arguments
+        
+        if buffer:
+            yield buffer.strip()
+
+        if not tool_calls:
+            self.messages.append({"role": "assistant", "content": answering_content})
+            if think_during_tool_calls: # 移除deepseek的reasoning_content
+                for message in self.messages:
+                    if message["role"] == "assistant" and "reasoning_content" in message:
+                        del message["reasoning_content"]
+        else:
+            # 处理最后一个tool call
+            yield self._tool_call_json_parser(tool_calls[-1])
+            tool_responses.append(self._handle_tool_call(tool_calls[-1]))
+            self.messages.append({"role": "assistant", "content": answering_content, "tool_calls": tool_calls})
+            if is_thinking and MODELS[self.userdata.model].get("think-during-tool-calls", False):
+                self.messages[-1]["reasoning_content"] = reasoning_content
+                think_during_tool_calls = True
+            self.messages.extend(tool_responses)
+            yield from self.__call__(think_during_tool_calls) # 直到ai完成所有操作
     
     def _handle_tool_call(self, tool_call: dict):
         tool_call_id = tool_call["id"]
@@ -242,8 +322,44 @@ class UserChat(ChatInstance):
         self.messages[-1]["content"] = image_messages + [{"type": "text", "text": "\n\n".join([i["text"] for i in text_messages])}]
 
 class TaskInstance:
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "searchWeb",
+                "description": "在互联网上搜索指定的查询",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "description": "要搜索的查询字符串",
+                            "type": "string",
+                        },
+                    },
+                    "required": ["query"]
+                },
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "readURL",
+                "description": "从互联网上读取指定URL的内容",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "description": "要访问的网页的URL",
+                            "type": "string",
+                        },
+                    },
+                    "required": ["url"]
+                },
+            },
+        },
+    ]
     def __init__(self, userdata: UserData, thinking: bool):
-        task_prompt = userdata.task_prompt_raw.format(time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"), device="QQ（减少使用复杂的表格、LaTeX等，多使用纯文本）")
+        task_prompt = userdata.task_prompt_raw.format(time=datetime.now().strftime("%Y-%m-%d %H:%M:%S %A"), device="QQ（减少使用复杂的表格、LaTeX等，多使用纯文本）")
         self.oclient = Utils.oclient(userdata.model)
         self.model = userdata.model
         self.messages: list[dict] = [{"role": "system", "content": task_prompt}]
@@ -254,7 +370,7 @@ class TaskInstance:
             "model": self.model,
             "messages": self.messages,
             "stream": False,
-            "tools": ChatInstance.tools,
+            "tools": TaskInstance.tools,
         }
         if MODELS[self.model].get("default-thinking") is not None and self.thinking != MODELS[self.model]["default-thinking"]:
             if self.thinking:
@@ -309,27 +425,25 @@ class Sync:
     KEY = REMOTE_API_KEY
     loop = None
     websocket = None
-    desynced = []
+    desynchronized: dict[str, list[str]] = {}
     
     @classmethod
     async def connect(cls):
         if not cls.URI:
             logger.info("同步服务器未设置")
             return
-        if os.path.exists("desynced.json"):
-            with open("desynced.json", "r", encoding="utf-8") as f:
-                cls.desynced = json.load(f)
+        if os.path.exists("data/desynchronized.json"):
+            with open("data/desynchronized.json", "r", encoding="utf-8") as f:
+                cls.desynchronized = json.load(f)
         while True: # reconnect
             try:
                 cls.loop = asyncio.get_event_loop()
                 cls.websocket = await websockets.connect(cls.URI, additional_headers={"key": cls.KEY}, open_timeout=10)
                 logger.info("已连接到同步服务器")
-                if cls.desynced:
-                    for user_id in cls.desynced:
-                        logger.info(f"正在全量同步用户 {user_id}")
-                        user = users[user_id]
-                        await cls.websocket.send(json.dumps({"user": user_id, "type": "sync", "operate": "push_all", "tasks": user.user_data.tasks, "memory": user.user_data.memory,}))
-                cls.desynced.clear()
+                if cls.desynchronized:
+                    logger.info("有未同步数据，开始全量同步...")
+                    await cls._sync_all_users()
+                cls.desynchronized.clear()
                 async for message in cls.websocket:
                     data = json.loads(message)
                     logger.debug(f"Sync received message: {data}")
@@ -374,8 +488,15 @@ class Sync:
             return
         if cls.websocket is None:
             logger.error("WebSocket 未连接，无法同步")
-            if data["user"] not in cls.desynced:
-                cls.desynced.append(data["user"])
+            if data["user"] not in cls.desynchronized:
+                cls.desynchronized[data["user"]] = []
+            user = cls.desynchronized[data["user"]]
+            if data["type"] == "task":
+                if "tasks" not in user:
+                    user.append("tasks")
+            elif data["type"] == "memory":
+                if "memory" not in user:
+                    user.append("memory")
             return
         if cls.loop is not None and cls.loop.is_running():
             asyncio.run_coroutine_threadsafe(
@@ -385,14 +506,16 @@ class Sync:
         logger.debug(f"Sync sent message: {data}")
     
     @classmethod
-    def sync_all(cls, user_id: int, user: UserData): # TODO: 不是最好的办法
-        cls._send({
-            "user": user_id,
-            "type": "sync",
-            "operate": "push_all",
-            "tasks": user.tasks,
-            "memory": user.memory,
-        })
+    async def _sync_all_users(cls):
+        for user_id in cls.desynchronized:
+            user = cls.desynchronized[user_id]
+            payload = {"user": user_id, "type": "sync", "operate": "push_all"}
+            if "tasks" in user:
+                payload["tasks"] = {name: {"trigger": task["trigger"], "schedule": task["schedule"]} for name, task in users[user_id].user_data.tasks.items()}
+            if "memory" in user:
+                payload["memory"] = users[user_id].user_data.memory
+            await cls.websocket.send(json.dumps(payload, ensure_ascii=False))
+        cls.desynchronized.clear()
     
     @classmethod
     def create_task(cls, user_id: int, name: str, data: dict):
@@ -433,11 +556,11 @@ class Sync:
     
     @classmethod
     def save(cls):
-        with open("desynced.json", "w", encoding="utf-8") as f:
-            json.dump(cls.desynced, f, ensure_ascii=False, indent=4)
+        with open("data/desynchronized.json", "w", encoding="utf-8") as f:
+            json.dump(cls.desynchronized, f, ensure_ascii=False, indent=4)
 
 class UserTaskScheduler:
-    scheduler = BackgroundScheduler(jobstores = {'default': SQLAlchemyJobStore(url='sqlite:///jobs.sqlite')})
+    scheduler = BackgroundScheduler(jobstores = {'default': SQLAlchemyJobStore(url='sqlite:///data/jobs.sqlite')})
     
     @classmethod
     def add_job(cls, trigger: str, schedule: str, user_id: int, job_name: str, job_description: str):
@@ -448,7 +571,7 @@ class UserTaskScheduler:
             id = cls.scheduler.add_job(cls.do_task, trigger, run_date=schedule, args=(user_id, job_name, job_description, trigger)).id
         else:
             raise ValueError("无效的触发类型")
-        Sync.create_task(user_id, job_name, {"id": id, "trigger": trigger, "schedule": schedule})
+        Sync.create_task(user_id, job_name, {"trigger": trigger, "schedule": schedule})
         return id
     
     @classmethod
@@ -459,6 +582,7 @@ class UserTaskScheduler:
     @classmethod
     def start(cls):
         cls.scheduler.add_listener(cls.on_job_executed, EVENT_JOB_EXECUTED)
+        cls.scheduler.add_listener(cls.on_job_missed, EVENT_JOB_MISSED)
         cls.scheduler.start()
     
     @classmethod
@@ -497,7 +621,3 @@ class UserTaskScheduler:
             if trigger_type == "date":
                 Sync.remove_task(user_id, task_name)
                 del users[user_id].user_data.tasks[task_name]
-    
-    @classmethod
-    def get_job_ids(cls):
-        return [job.id for job in cls.scheduler.get_jobs()]

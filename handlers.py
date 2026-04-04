@@ -1,6 +1,9 @@
 import importlib
 from types import ModuleType
-from bigmodel import *
+import threading
+import time
+from datetime import datetime
+from custom_functions import *
 
 username_cache = LRUCache(500, allow_reverse=True)
 
@@ -62,7 +65,6 @@ class Handle_group_message:
                     "message": message
                 },
             }, ensure_ascii=False)
-            # global_queue.put(data)
             push_to_websocket(data)
 
 class Handle_private_message:
@@ -127,8 +129,35 @@ class Handle_private_message:
                     "message": f"{message}"
                 },
             }, ensure_ascii=False)
-            # global_queue.put(response_json)
             push_to_websocket(response_json)
+
+class Handle_friend_request:
+    @staticmethod
+    def handle_friend_request(data):
+        logger.info(f"处理好友请求: {data['user_id']}")
+        flag = data["flag"]
+        comment = data["comment"]
+        # comment如下：
+        # 问题1:Enter Key\n回答:123123123\n
+        token = comment.split("\n")[1][3:].strip() 
+        if not token:
+            Handle_friend_request._send_result(flag, False)
+            return
+        if not API.verify_friend_request_token(data["user_id"], token):
+            Handle_friend_request._send_result(flag, False)
+            return
+        Handle_friend_request._send_result(flag, True)
+    
+    @staticmethod
+    def _send_result(flag: str, is_passed: bool):
+        response_json = json.dumps({
+            "action": "set_friend_add_request",
+            "params": {
+                "flag": flag,
+                "approve": is_passed,
+            },
+        }, ensure_ascii=False)
+        push_to_websocket(response_json)
 
 user_locks: dict[int, threading.Lock] = {}
 group_locks: dict[int, threading.Lock] = {}
@@ -184,7 +213,7 @@ async def handler(websocket):
             elif data["post_type"] == "notice":
                 if data["notice_type"] == "notify":
                     if data["sub_type"] == "input_status":
-                        if data["status_text"] == "对方正在输入...":
+                        if data["status_text"] != "":
                             user_id = data["user_id"]
                             if user_id not in users:
                                 continue # 忽略不在用户列表中的用户
@@ -192,6 +221,10 @@ async def handler(websocket):
                                 continue # 上次输入时间小于5秒，忽略
                             user_last_input_time[user_id] = time.time() # 更新上次输入时间
                             threading.Thread(target=_private_message_on_input_handler, args=(user_id,)).start()
+            elif data["post_type"] == "request":
+                if data["request_type"] == "friend":
+                    if ALLOW_ADD_BOT_WITH_TOKEN_VERIFY:
+                        threading.Thread(target=Handle_friend_request.handle_friend_request, args=(data,)).start()
     except websockets.exceptions.ConnectionClosedError:
         logger.info("与Napcat连接已关闭")
     finally:

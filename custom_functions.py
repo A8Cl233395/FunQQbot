@@ -138,11 +138,11 @@ class API:
     def _ncm_url(url: str) -> str:
         response = requests.get(f"{API.api}/ncmlyric", headers={"key": API.key}, params={"url": url})
         return response.text
-    
+
     @staticmethod
-    def get_userdata(user_id: str) -> dict:
-        response = requests.get(f"{API.api}/userdata", headers={"key": API.key}, params={"uid": user_id}).json()
-        return response
+    def verify_friend_request_token(qqid: int, token: str) -> bool:
+        response = requests.get(f"{API.api}/invitecheck", headers={"key": API.key}, params={"qqid": qqid, "token": token})
+        return response.json()
 
 class NapcatAPI:
     username_cache = LRUCache(128)

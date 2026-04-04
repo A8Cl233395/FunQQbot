@@ -4,7 +4,7 @@ def hook_init(self: "Handle_private_message", config: dict):
     # self.config # 当前用户配置 dict
     self.command_check_prompt = config["COMMAND_CHECK_PROMPT"]
     self.command_output_mapping = config["COMMAND_OUTPUT_MAPPING"]
-    if not os.path.exists(f"configs/users/{self.user_id}.json"):
+    if not os.path.exists(f"data/users/{self.user_id}.json"):
         data = {
             "thinking": config["ENABLE_THINKING_DEFAULT"],
             "enable_function": config["ENABLE_COMMAND_DEFAULT"],
@@ -12,7 +12,7 @@ def hook_init(self: "Handle_private_message", config: dict):
             "memory": [],
         }
     else:
-        with open(f"configs/users/{self.user_id}.json", "r", encoding="utf-8") as f:
+        with open(f"data/users/{self.user_id}.json", "r", encoding="utf-8") as f:
             data = json.load(f)
     self.user_data = UserData(
         user_id=self.user_id,
@@ -22,8 +22,8 @@ def hook_init(self: "Handle_private_message", config: dict):
         memory=data["memory"],
         thinking=data["thinking"],
         enable_function=data["enable_function"],
-        prompt_raw=config["CHAT_PROMPT_RAW"],
-        task_prompt_raw=config["TASK_PROMPT_RAW"],
+        prompt_raw=config["CHAT_PROMPT_RAW"], # TODO
+        task_prompt_raw=config["TASK_PROMPT_RAW"], # TODO
     )
     self.chat_instance = UserChat(self.user_data)
     self.last_message_time = time.time()
@@ -72,7 +72,7 @@ def hook_on_input(self: Handle_private_message):
 
 def hook_on_quit(self: Handle_private_message):
     # self.config # 当前用户配置 dict
-    with open(f"configs/users/{self.user_id}.json", "w", encoding="utf-8") as f:
+    with open(f"data/users/{self.user_id}.json", "w", encoding="utf-8") as f:
         json.dump({"thinking": self.user_data.thinking, "enable_function": self.user_data.enable_function, "tasks": self.user_data.tasks, "memory": self.user_data.memory}, f, ensure_ascii=False)
 
 def chat(self: Handle_private_message, messages):

@@ -28,31 +28,38 @@ MODELS: dict = base_config["MODELS"]
 SELF_ID: int = base_config["SELF_ID"]
 SELF_ID_STR: str = str(SELF_ID)
 logger.setLevel(base_config["LOG_LEVEL"])
+ALLOW_ADD_BOT_WITH_TOKEN_VERIFY: bool = base_config["ALLOW_ADD_BOT_WITH_TOKEN_VERIFIED"]
 del base_config
 
 try:
     response = requests.get(f"{REMOTE_API_URL}/status", headers={"key": REMOTE_API_KEY}, timeout=5)
     if response.status_code == 403:
-        logger.error("远程API密钥错误！")
+        logger.critical("远程API密钥错误！")
         exit(1)
     elif response.status_code == 500:
-        logger.error("远程API服务错误！")
+        logger.critical("远程API服务错误！")
         exit(1)
     service_status = response.json()
-    if "version" not in service_status or service_status["version"] != "2":
-        logger.error("远程API服务版本不匹配！")
+    if "version" not in service_status or service_status["version"] != "3":
+        logger.critical("远程API服务版本不匹配！")
         exit(1)
-    if not service_status["ocr"] and ENABLE_OCR:
-        logger.error("远程API OCR 功能未开启！")
+    if ENABLE_OCR and not service_status["ocr"]:
+        logger.critical("远程API OCR 功能未开启！")
         exit(1)
-    if not service_status["transcribe"] and ENABLE_STT:
-        logger.error("远程API 语音转文字 功能未开启！")
+    if ENABLE_STT and not service_status["transcribe"]:
+        logger.critical("远程API 语音转文字 功能未开启！")
+        exit(1)
+    if REMOTE_WEBSOCKET_URI and not service_status["link"]:
+        logger.critical("远程API 同步 功能未开启！")
+        exit(1)
+    if ALLOW_ADD_BOT_WITH_TOKEN_VERIFY and not service_status["invite"]:
+        logger.critical("远程API 邀请验证 功能未开启！")
         exit(1)
 except requests.exceptions.RequestException:
-    logger.error("无法连接到远程API服务！")
+    logger.critical("无法连接到远程API服务！")
     exit(1)
 except requests.exceptions.Timeout:
-    logger.error("无法连接到远程API服务！")
+    logger.critical("无法连接到远程API服务！")
     exit(1)
 finally:
     try:
