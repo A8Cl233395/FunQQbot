@@ -70,8 +70,11 @@ def messages_to_text(data, self_name) -> tuple[str, str, bool]:
                     output_text += f"\n{message_text}"
             case "image":
                 if ENABLE_OCR:
-                    image_text = API.ocr(message["data"]["url"].replace("https", "http"))
-                    output_text += f"\n```图片OCR结果\n{image_text}\n``` "
+                    if "sub_type" in message["data"] and message["data"]["sub_type"] == 0:
+                        image_text = API.ocr(message["data"]["url"].replace("https", "http"))
+                        output_text += f"\n```图片OCR结果\n{image_text}\n``` "
+                    else:
+                        output_text += f"\n<表情包>"
                 else:
                     output_text += f"\n<图片>"
             case "json":

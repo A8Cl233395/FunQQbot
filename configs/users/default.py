@@ -83,7 +83,11 @@ def chat(self: Handle_private_message, messages):
                 contains_text = True
                 self.chat_instance.add({"type": "text", "text": message["data"]["text"]})
             case "image":
-                self.chat_instance.add({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{Utils.url_to_b64(message['data']['url'].replace('https', 'http'))}"}})
+                contains_text = True
+                if "sub_type" in message["data"] and message["data"]["sub_type"] == 0:
+                    self.chat_instance.add({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{Utils.url_to_b64(message['data']['url'].replace('https', 'http'))}"}})
+                else:
+                    self.chat_instance.add({"type": "text", "text": "<表情包>"})
             case "json":
                 text = json.loads(message["data"]["data"])
                 self.chat_instance.add({"type": "text", "text": f"<卡片: {text['prompt']}>"})

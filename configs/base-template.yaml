@@ -3,6 +3,7 @@
 
 # 远程API配置(https://github.com/A8Cl233395/BingScraperApi)
 REMOTE_API_URL: https://your-remote-api-url.com
+REMOTE_WEBSOCKET_URI: ws://your-remote-api-url.com/link
 REMOTE_API_KEY: your_remote_api_key_here
 
 # 功能开关
@@ -50,3 +51,5 @@ MODELS:
     url: https://dashscope.aliyuncs.com/compatible-mode/v1
 
 LOG_LEVEL: INFO # 日志级别（DEBUG, INFO, WARNING, ERROR, CRITICAL）
+
+ALLOW_ADD_BOT_WITH_TOKEN_VERIFIED: true # 是否允许添加机器人（需验证token）
