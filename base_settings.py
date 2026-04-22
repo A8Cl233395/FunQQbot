@@ -29,6 +29,7 @@ SELF_ID: int = base_config["SELF_ID"]
 SELF_ID_STR: str = str(SELF_ID)
 logger.setLevel(base_config["LOG_LEVEL"])
 ALLOW_ADD_BOT_WITH_TOKEN_VERIFY: bool = base_config["ALLOW_ADD_BOT_WITH_TOKEN_VERIFIED"]
+ALLOW_GET_WEB_TOKEN: bool = base_config["ALLOW_GET_WEB_TOKEN"]
 del base_config
 
 try:
@@ -40,7 +41,7 @@ try:
         logger.critical("远程API服务错误！")
         exit(1)
     service_status = response.json()
-    if "version" not in service_status or service_status["version"] != "3":
+    if "version" not in service_status or service_status["version"] != "4":
         logger.critical("远程API服务版本不匹配！")
         exit(1)
     if ENABLE_OCR and not service_status["ocr"]:
@@ -54,6 +55,9 @@ try:
         exit(1)
     if ALLOW_ADD_BOT_WITH_TOKEN_VERIFY and not service_status["invite"]:
         logger.critical("远程API 邀请验证 功能未开启！")
+        exit(1)
+    if ALLOW_GET_WEB_TOKEN and not service_status["webchat"]:
+        logger.critical("远程API 网页聊天 功能未开启！")
         exit(1)
 except requests.exceptions.RequestException:
     logger.critical("无法连接到远程API服务！")

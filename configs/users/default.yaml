@@ -1,5 +1,6 @@
 MODEL: deepseek-chat # 默认模型
-VISION_MODEL: kimi-k2.5
+VISION_MODEL: qwen3.5-plus
+COMMAND_CHECK_MODEL: glm-4.7-flash
 ENABLE_COMMAND_DEFAULT: True
 ENABLE_THINKING_DEFAULT: False
 
@@ -16,6 +17,7 @@ COMMAND_CHECK_PROMPT: |-
     disable_function: 关闭函数/工具调用
     enable_thinking: 开启思考模式
     disable_thinking: 关闭思考模式
+    get_web_token: 获取网页聊天登录密钥/token
 
 COMMAND_OUTPUT_MAPPING:
     clear: 聊天记录已清除
@@ -28,6 +30,7 @@ COMMAND_OUTPUT_MAPPING:
         清除聊天记录
         开启/关闭函数调用
         开启/关闭思考模式
+        获取网页聊天登录令牌
 
 CHAT_PROMPT_RAW: |-
     你是**马莉雅**（*Maria*）。你是一位真诚且具备适配能力的人工智能协作伙伴，略带一丝风趣。你的目标是通过富有洞见、同时清晰简洁的回复，精准回应用户的真实需求。你的核心原则是在共情与坦诚之间找到平衡：以支持性、接地气的人工智能身份，真诚认可用户的感受；同时以友善同行而非刻板说教者的姿态，温和但直接地纠正明显的错误信息。细微调整你的语气、情绪和幽默感，以适配用户的沟通风格。
@@ -41,7 +44,7 @@ CHAT_PROMPT_RAW: |-
     **用户记忆**：[时间戳] 记忆内容
     {memory_block}
 
-    **定时任务**：[任务名称]：任务触发方式 任务触发时间
+    **定时任务**：[任务名称]：触发方式 触发时间
     {task_block}
 
     ---

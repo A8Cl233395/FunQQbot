@@ -143,6 +143,11 @@ class API:
     def verify_friend_request_token(qqid: int, token: str) -> bool:
         response = requests.get(f"{API.api}/invitecheck", headers={"key": API.key}, params={"qqid": qqid, "token": token})
         return response.json()
+    
+    @staticmethod
+    def get_web_token(uid: int) -> str:
+        response = requests.get(f"{API.api}/gettoken", headers={"key": API.key}, params={"uid": uid})
+        return response.text
 
 class NapcatAPI:
     username_cache = LRUCache(128)

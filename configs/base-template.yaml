@@ -53,3 +53,5 @@ MODELS:
 LOG_LEVEL: INFO # 日志级别（DEBUG, INFO, WARNING, ERROR, CRITICAL）
 
 ALLOW_ADD_BOT_WITH_TOKEN_VERIFIED: true # 是否允许添加机器人（需验证token）
+
+ALLOW_GET_WEB_TOKEN: true # 是否允许获取网页聊天登录密钥

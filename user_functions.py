@@ -9,12 +9,12 @@ class UserChat:
             "type": "function",
             "function": {
                 "name": "searchWeb",
-                "description": "在互联网上搜索指定的内容。只在需要最新信息时使用",
+                "description": "进行网络搜索",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "query": {
-                            "description": "要搜索的内容",
+                            "description": "查询的内容",
                             "type": "string",
                         },
                     },
@@ -26,12 +26,12 @@ class UserChat:
             "type": "function",
             "function": {
                 "name": "readURL",
-                "description": "读取链接的内容",
+                "description": "访问指定URL",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "url": {
-                            "description": "要访问的URL",
+                            "description": "访问的URL",
                             "type": "string",
                         },
                     },
@@ -48,28 +48,28 @@ class UserChat:
                     "type": "object",
                     "properties": {
                         "name": {
-                            "description": "任务名称，唯一",
+                            "description": "名称，唯一",
                             "type": "string",
                         },
                         "trigger": {
-                            "description": "任务触发方式，需要date或cron参数",
+                            "description": "触发方式",
                             "type": "string",
                             "enum": ["date", "cron"],
                         },
                         "schedule": {
                             "anyOf": [
                                 {
-                                    "description": "date任务触发日期，格式为YYYY-MM-DDTHH:MM:SS",
+                                    "description": "date触发日期，格式为YYYY-MM-DDTHH:MM:SS",
                                     "type": "string",
                                 },
                                 {
-                                    "description": "cron任务触发表达式，5个字段",
+                                    "description": "cron触发表达式，5个字段",
                                     "type": "string",
                                 }
                             ]
                         },
                         "description": {
-                            "description": "任务描述，详细说明任务的具体内容、目的、执行细节等。",
+                            "description": "此项会作为AI的输入",
                             "type": "string",
                         },
                     },
@@ -86,7 +86,7 @@ class UserChat:
                     "type": "object",
                     "properties": {
                         "name": {
-                            "description": "要删除的任务名称",
+                            "description": "任务名称",
                             "type": "string",
                         },
                     },
@@ -97,34 +97,22 @@ class UserChat:
         {
             "type": "function",
             "function": {
-                "name": "addMemory",
-                "description": "添加一条记忆。在需要永久记住内容的时候使用",
+                "name": "manageMemory",
+                "description": "管理永久记忆，此处的记忆会持久化存储",
                 "parameters": {
                     "type": "object",
                     "properties": {
+                        "operation": {
+                            "description": "操作",
+                            "type": "string",
+                            "enum": ["add", "remove"],
+                        },
                         "memory": {
-                            "description": "要记住的内容（不包含时间戳）",
+                            "description": "要操作的记忆内容，删除时需要内容必须完全匹配（包括时间戳）",
                             "type": "string",
                         },
                     },
-                    "required": ["memory"]
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "removeMemory",
-                "description": "删除一条记忆",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "memory": {
-                            "description": "要删除的记忆内容，内容必须完全匹配（包括时间戳）",
-                            "type": "string",
-                        },
-                    },
-                    "required": ["memory"]
+                    "required": ["operation", "memory"]
                 },
             },
         }
@@ -137,10 +125,10 @@ class UserChat:
     
     def clear(self):
         # HIGHWAY TO HELL
-        self.messages = [{"role": "system", "content": self.userdata.prompt_raw.format(memory_block="\n".join(self.userdata.memory or ["暂无记忆"]), task_block="\n".join([f"[{task_name}]: {self.userdata.tasks[task_name]['trigger']} {self.userdata.tasks[task_name]['schedule']}" for task_name in self.userdata.tasks] or ["暂无任务"]), device="QQ（减少使用复杂的表格、LaTeX等，多使用纯文本）", time=datetime.now().strftime("%Y-%m-%d %H:%M:%S %A"))}]
+        self.messages = [{"role": "system", "content": self.userdata.prompt_raw.format(memory_block="\n".join(self.userdata.memory or ["暂无记忆"]), task_block="\n".join([f"[{task_name}]: {self.userdata.tasks[task_name]['trigger']} {self.userdata.tasks[task_name]['schedule']}" for task_name in self.userdata.tasks] or ["暂无任务"]), device="QQ（使用纯文本，不使用LaTeX和表格等）", time=datetime.now().strftime("%Y-%m-%d %H:%M:%S %A"))}]
         self.contain_image = False
-
-    def ai(self):
+    
+    def _ai(self):
         params = {
             "model": self.userdata.vision_model if self.contain_image else self.userdata.model,
             "messages": self.messages,
@@ -158,84 +146,99 @@ class UserChat:
         return completion
 
     def __call__(self, think_during_tool_calls=False):
-        completion = self.ai()
-        answering_content = ""
-        reasoning_content = ""
-        buffer = ""
-        is_thinking = False
-        # is_answering = False
-        tool_calls = []
-        tool_responses = []
-        for chunk in completion:
-            delta = chunk.choices[0].delta
-            if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                if not is_thinking:
-                    is_thinking = True
-                    # yield "---Thinking---"
-                reasoning_content += delta.reasoning_content
-                # buffer += delta.reasoning_content
-                # if "\n\n" in buffer:
-                #     parts = buffer.split("\n\n", 1)
-                #     yield parts[0].strip()
-                #     buffer = parts[1].strip() if len(parts) > 1 else ""  # 双换行之后的内容（如果有）
-            elif hasattr(delta, "content") and delta.content:
-                # if not is_answering:
-                    # if buffer:
-                    #     yield buffer.strip()
-                    #     buffer = ""
-                    # if is_thinking:
-                    #     yield "---Answering---"
-                    # is_answering = True
-                answering_content += delta.content
-                buffer += delta.content
-                if "\n\n" in buffer:
-                    parts = buffer.split("\n\n", 1)
-                    yield parts[0].strip()
-                    buffer = parts[1].strip() if len(parts) > 1 else ""  # 双换行之后的内容（如果有）
-            elif hasattr(delta, "tool_calls") and delta.tool_calls:
-                if buffer:
-                    yield buffer.strip()
-                    buffer = ""
-                for tool_call in delta.tool_calls:
-                    if tool_call.id and tool_call.function.name: # 新的tool call
-                        if tool_calls: # 处理旧的（完成生成的）tool call
-                            yield self._tool_call_json_parser(tool_calls[-1])
-                            # TODO: 懒得优化了，卡着
-                            tool_responses.append(self._handle_tool_call(tool_calls[-1]))
-                        tool_calls.append({
-                            "id": tool_call.id,
-                            "function": {
-                                "arguments": "",
-                                "name": tool_call.function.name,
-                            },
-                            "type": "function",
-                        })
-                        yield f"---Tool Call: {tool_call.function.name}---" if tool_call.function.name else "---Tool Call---"
-                    if tool_call.function.arguments:
-                        if tool_call.index:
-                            tool_calls[tool_call.index]["function"]["arguments"] += tool_call.function.arguments
-                        else: # 兼容gemini。gemini只有一个tool call并且index = None
-                            tool_calls[-1]["function"]["arguments"] += tool_call.function.arguments
-        
-        if buffer:
-            yield buffer.strip()
-
-        if not tool_calls:
-            self.messages.append({"role": "assistant", "content": answering_content})
-            if think_during_tool_calls: # 移除deepseek的reasoning_content
-                for message in self.messages:
-                    if message["role"] == "assistant" and "reasoning_content" in message:
-                        del message["reasoning_content"]
-        else:
-            # 处理最后一个tool call
-            yield self._tool_call_json_parser(tool_calls[-1])
-            tool_responses.append(self._handle_tool_call(tool_calls[-1]))
-            self.messages.append({"role": "assistant", "content": answering_content, "tool_calls": tool_calls})
-            if is_thinking and MODELS[self.userdata.model].get("think-during-tool-calls", False):
-                self.messages[-1]["reasoning_content"] = reasoning_content
-                think_during_tool_calls = True
-            self.messages.extend(tool_responses)
-            yield from self.__call__(think_during_tool_calls) # 直到ai完成所有操作
+        try:
+            completion = self._ai()
+            answering_content = ""
+            reasoning_content = ""
+            buffer = ""
+            is_thinking = False
+            # is_answering = False
+            tool_calls = []
+            tool_responses = []
+            for chunk in completion:
+                delta = chunk.choices[0].delta
+                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                    if not is_thinking:
+                        is_thinking = True
+                        # yield "---Thinking---"
+                    reasoning_content += delta.reasoning_content
+                    # buffer += delta.reasoning_content
+                    # if "\n\n" in buffer:
+                    #     parts = buffer.split("\n\n", 1)
+                    #     yield parts[0].strip()
+                    #     buffer = parts[1].strip() if len(parts) > 1 else ""  # 双换行之后的内容（如果有）
+                if hasattr(delta, "content") and delta.content: # WHY QWEN SENTS THIS WITH REASONING_CONTENT WTF
+                    # if not is_answering:
+                        # if buffer:
+                        #     yield buffer.strip()
+                        #     buffer = ""
+                        # if is_thinking:
+                        #     yield "---Answering---"
+                        # is_answering = True
+                    answering_content += delta.content
+                    buffer += delta.content
+                    if "\n\n" in buffer:
+                        parts = buffer.split("\n\n", 1)
+                        yield parts[0].strip()
+                        buffer = parts[1].strip() if len(parts) > 1 else ""  # 双换行之后的内容（如果有）
+                if hasattr(delta, "tool_calls") and delta.tool_calls:
+                    if buffer:
+                        yield buffer.strip()
+                        buffer = ""
+                    for tool_call in delta.tool_calls:
+                        if tool_call.id and tool_call.function.name: # 新的tool call
+                            if tool_calls: # 处理旧的（完成生成的）tool call
+                                yield self._tool_call_json_parser(tool_calls[-1])
+                                # TODO: 懒得优化了，卡着
+                                tool_responses.append(self._handle_tool_call(tool_calls[-1]))
+                            tool_calls.append({
+                                "id": tool_call.id,
+                                "function": {
+                                    "arguments": "",
+                                    "name": tool_call.function.name,
+                                },
+                                "type": "function",
+                            })
+                            yield f"---Tool Call: {tool_call.function.name}---" if tool_call.function.name else "---Tool Call---"
+                        if tool_call.function.arguments:
+                            if tool_call.index:
+                                tool_calls[tool_call.index]["function"]["arguments"] += tool_call.function.arguments
+                            else: # 兼容gemini。gemini只有一个tool call并且index = None
+                                tool_calls[-1]["function"]["arguments"] += tool_call.function.arguments
+            
+            print(chunk)
+            
+            if buffer:
+                yield buffer.strip()
+            
+            if not tool_calls:
+                self.messages.append({"role": "assistant", "content": answering_content})
+                if think_during_tool_calls: # 移除deepseek的reasoning_content
+                    for message in self.messages:
+                        if message["role"] == "assistant" and "reasoning_content" in message:
+                            del message["reasoning_content"]
+            else:
+                # 处理最后一个tool call
+                yield self._tool_call_json_parser(tool_calls[-1])
+                tool_responses.append(self._handle_tool_call(tool_calls[-1]))
+                self.messages.append({"role": "assistant", "content": answering_content, "tool_calls": tool_calls})
+                if is_thinking and MODELS[self.userdata.model].get("think-during-tool-calls", False):
+                    self.messages[-1]["reasoning_content"] = reasoning_content
+                    think_during_tool_calls = True
+                self.messages.extend(tool_responses)
+                yield from self.__call__(think_during_tool_calls) # 直到ai完成所有操作
+        except Exception as e:
+            id = os.urandom(4).hex()
+            yield f"---Error ! Trace id: {id}---"
+            logger.error(f"Error in {id}: {str(e)}")
+            yield f"正在尝试回滚消息..."
+            messages = self.messages.copy()
+            messages.reverse()
+            for message in messages:
+                self.messages.pop()
+                if message["role"] == "user":
+                    break
+            yield "成功回滚到上一回合消息"
     
     def _handle_tool_call(self, tool_call: dict):
         tool_call_id = tool_call["id"]
@@ -260,22 +263,25 @@ class UserChat:
                         content = f"任务 {arguments_json['name']} 已删除！"
                     except Exception as e:
                         content = f"任务 {arguments_json['name']} 删除失败！错误信息：{str(e)}"
-                case "addMemory":
-                    mem = f"[{datetime.now().strftime('%Y-%m-%d')}] {arguments_json['memory']}"
-                    self.userdata.memory.append(mem)
-                    Sync.add_memory(self.userdata.user_id, mem)
-                    content = f"记忆 \"{mem}\" 已添加！"
-                case "removeMemory":
-                    try:
-                        self.userdata.memory.remove(arguments_json["memory"])
-                        Sync.remove_memory(self.userdata.user_id, arguments_json["memory"])
-                        content = f"记忆 \"{arguments_json['memory']}\" 已删除！"
-                    except ValueError:
-                        content = f"记忆 {arguments_json['memory']} 不存在！"
+                case "manageMemory":
+                    if arguments_json["operation"] == "add":
+                        mem = f"[{datetime.now().strftime('%m-%d')}] {arguments_json['memory']}"
+                        self.userdata.memory.append(mem)
+                        Sync.add_memory(self.userdata.user_id, mem)
+                        content = f"记忆 \"{mem}\" 已添加！"
+                    elif arguments_json["operation"] == "remove":
+                        try:
+                            self.userdata.memory.remove(arguments_json["memory"])
+                            Sync.remove_memory(self.userdata.user_id, arguments_json["memory"])
+                            content = f"记忆 \"{arguments_json['memory']}\" 已删除！"
+                        except ValueError:
+                            content = f"记忆 {arguments_json['memory']} 不存在！"
                 case _:
                     content = f"Error: Unknown function name: {tool_call['function']['name']}!"
         except json.JSONDecodeError:
             content = f"Error: Not a valid JSON string!"
+        except ValueError:
+            content = f"Error: {str(e)}"
         return {
             "role": "tool",
             "content": content,
@@ -296,10 +302,8 @@ class UserChat:
                 return f"任务名称: {arguments_json['name']}\n触发方式: {arguments_json['trigger']}\n计划时间: {arguments_json['schedule']}\n任务描述: \n{arguments_json['description']}"
             case "removeTask":
                 return f"任务名称: {arguments_json['name']}"
-            case "addMemory":
-                return f"记忆: {arguments_json['memory']}"
-            case "removeMemory":
-                return f"记忆: {arguments_json['memory']}"
+            case "manageMemory":
+                return f"操作: {arguments_json['operation']}\n记忆: {arguments_json['memory']}"
             case _:
                 return f"错误：未知的函数名：{tool_call['function']['name']}！"
 
@@ -327,12 +331,12 @@ class TaskInstance:
             "type": "function",
             "function": {
                 "name": "searchWeb",
-                "description": "在互联网上搜索指定的查询",
+                "description": "进行网络搜索",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "query": {
-                            "description": "要搜索的查询字符串",
+                            "description": "查询的内容",
                             "type": "string",
                         },
                     },
@@ -344,12 +348,12 @@ class TaskInstance:
             "type": "function",
             "function": {
                 "name": "readURL",
-                "description": "从互联网上读取指定URL的内容",
+                "description": "访问指定URL",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "url": {
-                            "description": "要访问的网页的URL",
+                            "description": "访问的URL",
                             "type": "string",
                         },
                     },
@@ -445,41 +449,44 @@ class Sync:
                     await cls._sync_all_users()
                 cls.desynchronized.clear()
                 async for message in cls.websocket:
-                    data = json.loads(message)
-                    logger.debug(f"Sync received message: {data}")
-                    if data["user"] not in users:
-                        init_user(data["user"])
-                    user = users[data["user"]]
-                    match data["type"]:
-                        case "memory":
-                            if data["operate"] == "add":
-                                user.userdata.memory.append(data["data"])
-                            elif data["operate"] == "remove":
-                                user.userdata.memory.remove(data["data"])
-                        case "task":
-                            if data["operate"] == "create":
-                                if data["name"] in user.userdata.tasks:
-                                    UserTaskScheduler.remove_job(user.userdata.user_id, data["name"])
-                                    del user.userdata.tasks[data["name"]]
-                                id = UserTaskScheduler.add_job(data["data"]["trigger"], data["data"]["schedule"], data["user"], data["name"], data["data"]["description"])
-                                user.userdata.tasks[data["name"]] = {"id": id, "trigger": data["data"]["trigger"], "schedule": data["data"]["schedule"]}
-                            elif data["operate"] == "remove":
-                                UserTaskScheduler.remove_job(user.userdata.user_id, data["name"])
-                                del user.userdata.tasks[data["name"]]
+                    try:
+                        data = json.loads(message)
+                        logger.debug(f"Sync received message: {data}")
+                        if data["user"] not in users:
+                            init_user(data["user"])
+                        user = users[data["user"]]
+                        match data["type"]:
+                            case "memory":
+                                if data["operate"] == "add":
+                                    user.user_data.memory.append(data["data"])
+                                elif data["operate"] == "remove":
+                                    user.user_data.memory.remove(data["data"])
+                            case "task":
+                                if data["operate"] == "create":
+                                    if data["name"] in user.user_data.tasks:
+                                        UserTaskScheduler.remove_job(user.user_data.user_id, data["name"])
+                                        del user.user_data.tasks[data["name"]]
+                                    id = UserTaskScheduler.add_job(data["data"]["trigger"], data["data"]["schedule"], data["user"], data["name"], data["data"]["description"])
+                                    user.user_data.tasks[data["name"]] = {"id": id, "trigger": data["data"]["trigger"], "schedule": data["data"]["schedule"]}
+                                elif data["operate"] == "remove":
+                                    UserTaskScheduler.remove_job(user.user_data.user_id, data["name"])
+                                    del user.user_data.tasks[data["name"]]
+                    except Exception as e:
+                        logger.error(f"Sync error: {e}")
             except asyncio.TimeoutError:
                 logger.warning("与同步服务器的连接超时，尝试重新连接...")
-                await asyncio.sleep(5)
                 cls.websocket = None
+                await asyncio.sleep(5)
                 continue
             except websockets.exceptions.ConnectionClosed:
                 logger.warning("与同步服务器的连接已关闭，尝试重新连接...")
-                await asyncio.sleep(5)
                 cls.websocket = None
+                await asyncio.sleep(5)
                 continue
             except Exception as e:
                 logger.warning(f"与同步服务器连接失败: {e}")
-                await asyncio.sleep(5)
                 cls.websocket = None
+                await asyncio.sleep(5)
                 continue
     
     @classmethod

@@ -55,6 +55,14 @@ def hook_on_message_receive(self: Handle_private_message, messages):
                         case "disable_thinking":
                             self.user_data.thinking = False
                             self.send_message(self.command_output_mapping[command])
+                        case "get_web_token":
+                            if ALLOW_GET_WEB_TOKEN:
+                                token = API.get_web_token(self.user_id)
+                                self.send_message("已获取网页聊天登录密钥（请勿泄露或展示）")
+                                self.send_message(token)
+                                self.send_message(f"可以前往 {REMOTE_API_URL}/webchat 进行网页版聊天")
+                            else:
+                                self.send_message("该功能未开启")
                         case _:
                             self.send_message(self.command_output_mapping["unknown"])
                             break
@@ -83,7 +91,6 @@ def chat(self: Handle_private_message, messages):
                 contains_text = True
                 self.chat_instance.add({"type": "text", "text": message["data"]["text"]})
             case "image":
-                contains_text = True
                 if "sub_type" in message["data"] and message["data"]["sub_type"] == 0:
                     self.chat_instance.add({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{Utils.url_to_b64(message['data']['url'].replace('https', 'http'))}"}})
                 else:
@@ -97,13 +104,8 @@ def chat(self: Handle_private_message, messages):
             case "video":
                 self.chat_instance.add({"type": "text", "text": "<视频>"})
             case "record":
-                contains_text = True
-                if ENABLE_STT:
-                    url = message["data"]["url"]
-                    text = API.transcribe(url)
-                    self.chat_instance.add({"type": "text", "text": text})
-                else:
-                    self.chat_instance.add({"type": "text", "text": "<无法识别的语音>"})
+                contains_text = False
+                self.chat_instance.add({"type": "text", "text": "<无法识别的语音>"})
             case "reply":
                 reply_data = NapcatAPI.get_message(message["data"]["id"])
                 text = messages_to_text(reply_data)[1]
