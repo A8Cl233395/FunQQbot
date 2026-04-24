@@ -136,16 +136,16 @@ class UserChat:
         }
         if self.userdata.enable_function:
             params["tools"] = UserChat.tools
-        if MODELS[self.userdata.model].get("default-thinking") is not None and self.userdata.thinking != MODELS[self.userdata.model]["default-thinking"]:
+        if "thinking-extra-body" in MODELS[self.userdata.model]:
             if self.userdata.thinking:
-                params["extra_body"] = MODELS[self.userdata.model]["thinking-toggle-extra-body"]["true"]
+                params["extra_body"] = MODELS[self.userdata.model]["thinking-extra-body"]["true"]
             else:
-                params["extra_body"] = MODELS[self.userdata.model]["thinking-toggle-extra-body"]["false"]
+                params["extra_body"] = MODELS[self.userdata.model]["thinking-extra-body"]["false"]  
         client = self.vision_oclient if self.contain_image else self.oclient
         completion = client.chat.completions.create(**params)
         return completion
-
-    def __call__(self, think_during_tool_calls=False):
+    
+    def __call__(self):
         try:
             completion = self._ai()
             answering_content = ""
@@ -167,7 +167,7 @@ class UserChat:
                     #     parts = buffer.split("\n\n", 1)
                     #     yield parts[0].strip()
                     #     buffer = parts[1].strip() if len(parts) > 1 else ""  # 双换行之后的内容（如果有）
-                if hasattr(delta, "content") and delta.content: # WHY QWEN SENTS THIS WITH REASONING_CONTENT WTF
+                if hasattr(delta, "content") and delta.content:
                     # if not is_answering:
                         # if buffer:
                         #     yield buffer.strip()
@@ -205,28 +205,21 @@ class UserChat:
                                 tool_calls[tool_call.index]["function"]["arguments"] += tool_call.function.arguments
                             else: # 兼容gemini。gemini只有一个tool call并且index = None
                                 tool_calls[-1]["function"]["arguments"] += tool_call.function.arguments
-            
-            print(chunk)
-            
             if buffer:
                 yield buffer.strip()
-            
             if not tool_calls:
                 self.messages.append({"role": "assistant", "content": answering_content})
-                if think_during_tool_calls: # 移除deepseek的reasoning_content
-                    for message in self.messages:
-                        if message["role"] == "assistant" and "reasoning_content" in message:
-                            del message["reasoning_content"]
+                if is_thinking:
+                    self.messages[-1]["reasoning_content"] = reasoning_content
             else:
                 # 处理最后一个tool call
                 yield self._tool_call_json_parser(tool_calls[-1])
                 tool_responses.append(self._handle_tool_call(tool_calls[-1]))
                 self.messages.append({"role": "assistant", "content": answering_content, "tool_calls": tool_calls})
-                if is_thinking and MODELS[self.userdata.model].get("think-during-tool-calls", False):
+                if is_thinking:
                     self.messages[-1]["reasoning_content"] = reasoning_content
-                    think_during_tool_calls = True
                 self.messages.extend(tool_responses)
-                yield from self.__call__(think_during_tool_calls) # 直到ai完成所有操作
+                yield from self.__call__() # 直到ai完成所有操作
         except Exception as e:
             id = os.urandom(4).hex()
             yield f"---Error ! Trace id: {id}---"
@@ -376,21 +369,21 @@ class TaskInstance:
             "stream": False,
             "tools": TaskInstance.tools,
         }
-        if MODELS[self.model].get("default-thinking") is not None and self.thinking != MODELS[self.model]["default-thinking"]:
+        if "thinking-extra-body" in MODELS[self.model]:
             if self.thinking:
-                params["extra_body"] = MODELS[self.model]["thinking-toggle-extra-body"]["true"]
+                params["extra_body"] = MODELS[self.model]["thinking-extra-body"]["true"]
             else:
-                params["extra_body"] = MODELS[self.model]["thinking-toggle-extra-body"]["false"]
+                params["extra_body"] = MODELS[self.model]["thinking-extra-body"]["false"]
         completion = self.oclient.chat.completions.create(**params)
         return completion.choices[0].message
     
-    def __call__(self, think_during_tool_calls=False):
+    def __call__(self):
         message = self.ai()
         tool_responses = []
         if hasattr(message, "tool_calls") and message.tool_calls:
             for tool_call in message.tool_calls:
                 tool_responses.append(self._handle_tool_call(tool_call))
-            if think_during_tool_calls or hasattr(message, "reasoning_content") and message.reasoning_content and MODELS[self.model].get("think-during-tool-calls", False):
+            if hasattr(message, "reasoning_content") and message.reasoning_content:
                 think_during_tool_calls = True
                 self.messages.append({"role": "assistant", "content": message.content, "tool_calls": message.tool_calls, "reasoning_content": message.reasoning_content})
             else:

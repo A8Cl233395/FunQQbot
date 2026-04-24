@@ -1,4 +1,4 @@
-MODEL: deepseek-chat # 默认模型
+MODEL: deepseek-v4-flash # 默认模型
 VISION_MODEL: qwen3.5-plus
 COMMAND_CHECK_MODEL: glm-4.7-flash
 ENABLE_COMMAND_DEFAULT: True

@@ -15,39 +15,40 @@ SELF_ID: 123456789
 
 # 大模型配置
 MODELS:
-  deepseek-chat:
-    api_key: your_deepseek_api_key_here
-    default-thinking: false
-    think-during-tool-calls: true
-    thinking-toggle-extra-body:
-      'false':
-        thinking:
-          type: disabled
-      'true':
-        thinking:
-          type: enabled
-    url: https://api.deepseek.com/beta
-  kimi-k2.5:
-    api_key: your_kimi_api_key_here
+  deepseek-v4-flash:
+    api_key: sk-xxx
     default-thinking: true
-    think-during-tool-calls: true
-    thinking-toggle-extra-body:
+    thinking-extra-body:
       'false':
         thinking:
           type: disabled
       'true':
         thinking:
           type: enabled
+    url: https://api.deepseek.com/
+  kimi-k2.6:
+    desc: "Kimi K2.6"
+    api_key: sk-xxx
+    default-thinking: true
+    thinking-extra-body:
+      'false':
+        thinking:
+          type: disabled
+      'true':
+        thinking:
+          type: enabled
+          keep: all
     url: https://api.moonshot.cn/v1
-  qwen3.5-plus:
-    api_key: your_qwen_api_key_here
-    default-thinking: false
-    think-during-tool-calls: false
-    thinking-toggle-extra-body:
+  qwen3.6-plus:
+    desc: "Qwen3.6 Plus"
+    api_key: sk-xxx
+    default-thinking: true
+    thinking-extra-body:
       'false':
         enable_thinking: false
       'true':
         enable_thinking: true
+        preserve_thinking: true
     url: https://dashscope.aliyuncs.com/compatible-mode/v1
 
 LOG_LEVEL: INFO # 日志级别（DEBUG, INFO, WARNING, ERROR, CRITICAL）
