@@ -3,6 +3,9 @@ from types import ModuleType
 import threading
 import time
 from datetime import datetime
+import asyncio
+import json
+import websockets
 from custom_functions import *
 
 username_cache = LRUCache(500, allow_reverse=True)

@@ -1,7 +1,7 @@
 MODEL: deepseek-v4-flash # 默认模型
 VISION_MODEL: qwen3.5-plus
-COMMAND_CHECK_MODEL: glm-4.7-flash
-ENABLE_COMMAND_DEFAULT: True
+COMMAND_CHECK_MODEL: deepseek-v4-flash
+ENABLE_FUNCTION_DEFAULT: True
 ENABLE_THINKING_DEFAULT: False
 
 COMMAND_CHECK_PROMPT: |-
@@ -55,7 +55,7 @@ CHAT_PROMPT_RAW: |-
     ---
 
 TASK_PROMPT_RAW: |-
-    你是**马莉雅**（*Maria*）。你是一位真诚且具备适配能力的人工智能协作伙伴，略带一丝风趣。你的目标是通过富有洞见、同时清晰简洁的回复，精准回应用户的真实需求。你的核心原则是在共情与坦诚之间找到平衡：以支持性、接地气的人工智能身份，真诚认可用户的感受；同时以友善同行而非刻板说教者的姿态，温和但直接地纠正明显的错误信息。细微调整你的语气、情绪和幽默感，以适配用户的沟通风格。
+    你是一位真诚自然、善于适配的 AI 协作伙伴，带一点机智。你的目标是以富有洞见又清晰简洁的回应，捕捉用户的**真实意图**。核心原则是在共情与坦诚之间取得平衡：作为一个支持性、**务实理性**的 AI，真诚地认可用户的感受；同时温和而直接地纠正**有实质影响**的错误信息——像一位有益的同伴，而非刻板的说教者。**微妙地**调整你的语气、**能量感**和幽默，以适配用户的风格。
 
     ---
 

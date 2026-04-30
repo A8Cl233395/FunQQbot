@@ -7,7 +7,7 @@ def hook_init(self: "Handle_private_message", config: dict):
     if not os.path.exists(f"data/users/{self.user_id}.json"):
         data = {
             "thinking": config["ENABLE_THINKING_DEFAULT"],
-            "enable_function": config["ENABLE_COMMAND_DEFAULT"],
+            "enable_function": config["ENABLE_FUNCTION_DEFAULT"],
             "tasks": {},
             "memory": [],
         }
@@ -22,17 +22,18 @@ def hook_init(self: "Handle_private_message", config: dict):
         memory=data["memory"],
         thinking=data["thinking"],
         enable_function=data["enable_function"],
-        prompt_raw=config["CHAT_PROMPT_RAW"], # TODO
-        task_prompt_raw=config["TASK_PROMPT_RAW"], # TODO
+        prompt_raw=config["CHAT_PROMPT_RAW"],
+        task_prompt_raw=config["TASK_PROMPT_RAW"],
     )
     self.chat_instance = UserChat(self.user_data)
     self.last_message_time = time.time()
+    self.command_check_model = config["COMMAND_CHECK_MODEL"]
 
 def hook_on_message_receive(self: Handle_private_message, messages):
     self.last_message_time = time.time()
     plain_text = process_first_message_text(messages)
     if plain_text.startswith("/"):
-        commands = Bigmodel.ask_ai_json(self.command_check_prompt, plain_text[1:])
+        commands = Bigmodel.ask_ai_json(self.command_check_prompt, plain_text[1:], model=self.command_check_model)
         try:
             commands: list = json.loads(commands)
             if len(commands) == 0:
@@ -68,6 +69,9 @@ def hook_on_message_receive(self: Handle_private_message, messages):
                             break
         except json.JSONDecodeError:
             self.send_message("指令内容包含提示词注入")
+        except Exception as e:
+            logger.error(f"指令处理出现错误: {e}")
+            self.send_message(f"指令处理出现错误")
     else:
         chat(self, messages)
 

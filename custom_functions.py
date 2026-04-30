@@ -1,16 +1,9 @@
 import base64
 from collections import OrderedDict
 from openai import OpenAI
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
-from apscheduler.triggers.cron import CronTrigger
-import asyncio
 from PIL import Image
 from io import BytesIO
-import json
-import websockets
 import re
-import sys
 from dataclasses import dataclass
 from base_settings import *
 
@@ -233,28 +226,40 @@ class Utils:
 
 class Bigmodel:
     @staticmethod
-    def ask_ai(prompt, content, model="deepseek-chat"):
+    def ask_ai(prompt, content, model, thinking=False):
         client = Utils.oclient(model)
         if prompt:
             messages = [{"role": "system", "content": prompt}, {"role": "user", "content": content}]
         else:
             messages = [{"role": "user", "content": content}]
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            stream=False
-        )
+        params = {
+            "model": model,
+            "messages": messages,
+            "stream": False
+        }
+        if "default_thinking" in MODELS[model]:
+            if thinking:
+                params["extra_body"] = MODELS[model]["thinking-extra-body"]['true']
+            else:
+                params["extra_body"] = MODELS[model]["thinking-extra-body"]['false']
+        response = client.chat.completions.create(**params)
         return response.choices[0].message.content
     
     @staticmethod
-    def ask_ai_json(prompt, content, model="deepseek-chat"):
+    def ask_ai_json(prompt, content, model, thinking=False):
         client = Utils.oclient(model)
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "system", "content": prompt}, {"role": "user", "content": content}],
-            response_format={"type": "json_object"},
-            stream=False
-        )
+        params = {
+            "model": model,
+            "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": content}],
+            "response_format": {"type": "json_object"},
+            "stream": False
+        }
+        if "default_thinking" in MODELS[model]:
+            if thinking:
+                params["extra_body"] = MODELS[model]["thinking-extra-body"]['true']
+            else:
+                params["extra_body"] = MODELS[model]["thinking-extra-body"]['false']
+        response = client.chat.completions.create(**params)
         return response.choices[0].message.content
 
 @dataclass
