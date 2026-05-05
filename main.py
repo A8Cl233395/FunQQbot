@@ -4,7 +4,6 @@ async def main():
     loop = asyncio.get_event_loop()
     set_event_loop(loop)
     server = await websockets.serve(handler, "0.0.0.0", 8080)
-    UserTaskScheduler.start()
     sync = asyncio.create_task(Sync.connect())
     logger.info("WebSocket服务器已在 ws://0.0.0.0:8080 启动，等待连接...")
     try:
@@ -13,7 +12,6 @@ async def main():
         logger.info("正在关闭服务器...")
         server.close()
         sync.cancel()
-        UserTaskScheduler.shutdown()
         Sync.save()
         logger.info("服务器已关闭。")
         logger.info("正在保存所有用户和群的状态...")

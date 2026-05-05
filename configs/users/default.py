@@ -8,7 +8,6 @@ def hook_init(self: "Handle_private_message", config: dict):
         data = {
             "thinking": config["ENABLE_THINKING_DEFAULT"],
             "enable_function": config["ENABLE_FUNCTION_DEFAULT"],
-            "tasks": {},
             "memory": [],
         }
     else:
@@ -18,12 +17,10 @@ def hook_init(self: "Handle_private_message", config: dict):
         user_id=self.user_id,
         model=config["MODEL"],
         vision_model=config["VISION_MODEL"],
-        tasks=data["tasks"],
         memory=data["memory"],
         thinking=data["thinking"],
         enable_function=data["enable_function"],
         prompt_raw=config["CHAT_PROMPT_RAW"],
-        task_prompt_raw=config["TASK_PROMPT_RAW"],
     )
     self.chat_instance = UserChat(self.user_data)
     self.last_message_time = time.time()
@@ -85,7 +82,7 @@ def hook_on_input(self: Handle_private_message):
 def hook_on_quit(self: Handle_private_message):
     # self.config # 当前用户配置 dict
     with open(f"data/users/{self.user_id}.json", "w", encoding="utf-8") as f:
-        json.dump({"thinking": self.user_data.thinking, "enable_function": self.user_data.enable_function, "tasks": self.user_data.tasks, "memory": self.user_data.memory}, f, ensure_ascii=False)
+        json.dump({"thinking": self.user_data.thinking, "enable_function": self.user_data.enable_function, "memory": self.user_data.memory}, f, ensure_ascii=False)
 
 def chat(self: Handle_private_message, messages):
     contains_text = False

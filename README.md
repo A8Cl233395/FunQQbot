@@ -173,7 +173,6 @@ def hook_process(self, message, context):
 ### 可用工具函数
 - `searchWeb(query)` - 网页搜索
 - `readURL(url)` - 读取网页内容
-- `createTask(name, description, cron)` - 创建定时任务
 - `getCurrentTime()` - 获取当前时间
 - `getWeather(location)` - 获取天气信息
 

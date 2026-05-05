@@ -1,9 +1,3 @@
-from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_MISSED
-from apscheduler.triggers.date import DateTrigger
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
-from apscheduler.triggers.cron import CronTrigger
-
 from handlers import *
 
 class UserChat:
@@ -45,61 +39,6 @@ class UserChat:
         {
             "type": "function",
             "function": {
-                "name": "createTask",
-                "description": "创建/替换一个任务。任务会调用AI并发送结果",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "description": "名称，唯一",
-                            "type": "string",
-                        },
-                        "trigger": {
-                            "description": "触发方式",
-                            "type": "string",
-                            "enum": ["date", "cron"],
-                        },
-                        "schedule": {
-                            "anyOf": [
-                                {
-                                    "description": "date触发日期，格式为YYYY-MM-DDTHH:MM:SS",
-                                    "type": "string",
-                                },
-                                {
-                                    "description": "cron触发表达式，5个字段",
-                                    "type": "string",
-                                }
-                            ]
-                        },
-                        "description": {
-                            "description": "此项会作为AI的输入",
-                            "type": "string",
-                        },
-                    },
-                    "required": ["name", "trigger", "schedule", "description"]
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "removeTask",
-                "description": "删除一个任务",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "description": "任务名称",
-                            "type": "string",
-                        },
-                    },
-                    "required": ["name"]
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
                 "name": "manageMemory",
                 "description": "管理永久记忆，此处的记忆会持久化存储",
                 "parameters": {
@@ -111,7 +50,7 @@ class UserChat:
                             "enum": ["add", "remove"],
                         },
                         "memory": {
-                            "description": "要操作的记忆内容，删除时需要内容必须完全匹配（包括时间戳）",
+                            "description": "要操作的记忆内容，添加时不需要时间戳，删除时需要内容必须完全匹配（包括时间戳）",
                             "type": "string",
                         },
                     },
@@ -128,7 +67,7 @@ class UserChat:
     
     def clear(self):
         # HIGHWAY TO HELL
-        self.messages = [{"role": "system", "content": self.userdata.prompt_raw.format(memory_block="\n".join(self.userdata.memory or ["暂无记忆"]), task_block="\n".join([f"[{task_name}]: {self.userdata.tasks[task_name]['trigger']} {self.userdata.tasks[task_name]['schedule']}" for task_name in self.userdata.tasks] or ["暂无任务"]), device="QQ（使用纯文本，不使用LaTeX和表格等）", time=datetime.now().strftime("%Y-%m-%d %H:%M:%S %A"))}]
+        self.messages = [{"role": "system", "content": self.userdata.prompt_raw.format(memory_block="\n".join(self.userdata.memory or ["暂无记忆"]), device="QQ（使用纯文本，不使用LaTeX和表格等）", time=datetime.now().strftime("%Y-%m-%d %A"))}]
         self.contain_image = False
     
     def _ai(self):
@@ -245,20 +184,6 @@ class UserChat:
                     content = Utils.customize_reader(arguments_json["url"])
                 case "searchWeb":
                     content = API.search(query=arguments_json["query"])
-                case "createTask":
-                    try:
-                        id = UserTaskScheduler.add_job(arguments_json["trigger"], arguments_json["schedule"], self.userdata.user_id, arguments_json["name"], arguments_json["description"])
-                        self.userdata.tasks[arguments_json["name"]] = {"id": id, "trigger": arguments_json["trigger"], "schedule": arguments_json["schedule"]}
-                        content = f"任务 {arguments_json['name']} 已创建！"
-                    except Exception as e:
-                        content = f"任务 {arguments_json['name']} 创建失败！错误信息：{str(e)}"
-                case "removeTask":
-                    try:
-                        UserTaskScheduler.remove_job(self.userdata.user_id, arguments_json["name"])
-                        del self.userdata.tasks[arguments_json["name"]]
-                        content = f"任务 {arguments_json['name']} 已删除！"
-                    except Exception as e:
-                        content = f"任务 {arguments_json['name']} 删除失败！错误信息：{str(e)}"
                 case "manageMemory":
                     if arguments_json["operation"] == "add":
                         mem = f"[{datetime.now().strftime('%m-%d')}] {arguments_json['memory']}"
@@ -276,7 +201,7 @@ class UserChat:
                     content = f"Error: Unknown function name: {tool_call['function']['name']}!"
         except json.JSONDecodeError:
             content = f"Error: Not a valid JSON string!"
-        except ValueError:
+        except ValueError as e:
             content = f"Error: {str(e)}"
         return {
             "role": "tool",
@@ -294,10 +219,6 @@ class UserChat:
                 return f"URL: {arguments_json['url']}"
             case "searchWeb":
                 return f"查询: {arguments_json['query']}"
-            case "createTask":
-                return f"任务名称: {arguments_json['name']}\n触发方式: {arguments_json['trigger']}\n计划时间: {arguments_json['schedule']}\n任务描述: \n{arguments_json['description']}"
-            case "removeTask":
-                return f"任务名称: {arguments_json['name']}"
             case "manageMemory":
                 return f"操作: {arguments_json['operation']}\n记忆: {arguments_json['memory']}"
             case _:
@@ -320,105 +241,6 @@ class UserChat:
             else:
                 image_messages.append(message)
         self.messages[-1]["content"] = image_messages + [{"type": "text", "text": "\n\n".join([i["text"] for i in text_messages])}]
-
-class TaskInstance:
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "searchWeb",
-                "description": "进行网络搜索",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "description": "查询的内容",
-                            "type": "string",
-                        },
-                    },
-                    "required": ["query"]
-                },
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "readURL",
-                "description": "访问指定URL",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "url": {
-                            "description": "访问的URL",
-                            "type": "string",
-                        },
-                    },
-                    "required": ["url"]
-                },
-            },
-        },
-    ]
-    def __init__(self, userdata: UserData, thinking: bool):
-        task_prompt = userdata.task_prompt_raw.format(time=datetime.now().strftime("%Y-%m-%d %H:%M:%S %A"), device="QQ（减少使用复杂的表格、LaTeX等，多使用纯文本）")
-        self.oclient = Utils.oclient(userdata.model)
-        self.model = userdata.model
-        self.messages: list[dict] = [{"role": "system", "content": task_prompt}]
-        self.thinking = thinking
-    
-    def ai(self):
-        params = {
-            "model": self.model,
-            "messages": self.messages,
-            "stream": False,
-            "tools": TaskInstance.tools,
-        }
-        if "thinking-extra-body" in MODELS[self.model]:
-            if self.thinking:
-                params["extra_body"] = MODELS[self.model]["thinking-extra-body"]["true"]
-            else:
-                params["extra_body"] = MODELS[self.model]["thinking-extra-body"]["false"]
-        completion = self.oclient.chat.completions.create(**params)
-        return completion.choices[0].message
-    
-    def __call__(self):
-        message = self.ai()
-        tool_responses = []
-        if hasattr(message, "tool_calls") and message.tool_calls:
-            for tool_call in message.tool_calls:
-                tool_responses.append(self._handle_tool_call(tool_call))
-            if hasattr(message, "reasoning_content") and message.reasoning_content:
-                think_during_tool_calls = True
-                self.messages.append({"role": "assistant", "content": message.content, "tool_calls": message.tool_calls, "reasoning_content": message.reasoning_content})
-            else:
-                self.messages.append({"role": "assistant", "content": message.content, "tool_calls": message.tool_calls})
-            self.messages.extend(tool_responses)
-            return self.__call__(think_during_tool_calls)
-        else:
-            return message.content
-    
-    def _handle_tool_call(self, tool_call: dict):
-        tool_call_id = tool_call.id
-        try:
-            arguments_json = json.loads(tool_call.function.arguments)
-            match tool_call.function.name:
-                case "readURL":
-                    content = API.read(url=arguments_json["url"])
-                case "searchWeb":
-                    content = API.search(query=arguments_json["query"])
-                case _:
-                    content = f"Error: Unknown function name: {tool_call['function']['name']}!"
-        except json.JSONDecodeError:
-            content = f"Error: Not a valid JSON string!"
-        return {
-            "role": "tool",
-            "content": content,
-            "tool_call_id": tool_call_id,
-        }
-
-    def add(self, content: dict):
-        if not self.messages or self.messages[-1]["role"] != "user":
-            self.messages.append({"role": "user", "content": []})
-        self.messages[-1]["content"].append(content)
 
 class Sync:
     URI = REMOTE_WEBSOCKET_URI
@@ -457,16 +279,6 @@ class Sync:
                                     user.user_data.memory.append(data["data"])
                                 elif data["operate"] == "remove":
                                     user.user_data.memory.remove(data["data"])
-                            case "task":
-                                if data["operate"] == "create":
-                                    if data["name"] in user.user_data.tasks:
-                                        UserTaskScheduler.remove_job(user.user_data.user_id, data["name"])
-                                        del user.user_data.tasks[data["name"]]
-                                    id = UserTaskScheduler.add_job(data["data"]["trigger"], data["data"]["schedule"], data["user"], data["name"], data["data"]["description"])
-                                    user.user_data.tasks[data["name"]] = {"id": id, "trigger": data["data"]["trigger"], "schedule": data["data"]["schedule"]}
-                                elif data["operate"] == "remove":
-                                    UserTaskScheduler.remove_job(user.user_data.user_id, data["name"])
-                                    del user.user_data.tasks[data["name"]]
                     except Exception as e:
                         logger.error(f"Sync error: {e}")
             except asyncio.TimeoutError:
@@ -494,10 +306,7 @@ class Sync:
             if data["user"] not in cls.desynchronized:
                 cls.desynchronized[data["user"]] = []
             user = cls.desynchronized[data["user"]]
-            if data["type"] == "task":
-                if "tasks" not in user:
-                    user.append("tasks")
-            elif data["type"] == "memory":
+            if data["type"] == "memory":
                 if "memory" not in user:
                     user.append("memory")
             return
@@ -513,31 +322,10 @@ class Sync:
         for user_id in cls.desynchronized:
             user = cls.desynchronized[user_id]
             payload = {"user": user_id, "type": "sync", "operate": "push_all"}
-            if "tasks" in user:
-                payload["tasks"] = {name: {"trigger": task["trigger"], "schedule": task["schedule"]} for name, task in users[user_id].user_data.tasks.items()}
             if "memory" in user:
                 payload["memory"] = users[user_id].user_data.memory
             await cls.websocket.send(json.dumps(payload, ensure_ascii=False))
         cls.desynchronized.clear()
-    
-    @classmethod
-    def create_task(cls, user_id: int, name: str, data: dict):
-        cls._send({
-            "user": user_id,
-            "type": "task",
-            "operate": "create",
-            "name": name,
-            "data": data
-        })
-    
-    @classmethod
-    def remove_task(cls, user_id: int, name: str):
-        cls._send({
-            "user": user_id,
-            "type": "task",
-            "operate": "remove",
-            "name": name
-        })
     
     @classmethod
     def add_memory(cls, user_id: int, mem: str):
@@ -561,66 +349,3 @@ class Sync:
     def save(cls):
         with open("data/desynchronized.json", "w", encoding="utf-8") as f:
             json.dump(cls.desynchronized, f, ensure_ascii=False, indent=4)
-
-class UserTaskScheduler:
-    scheduler = BackgroundScheduler(jobstores = {'default': SQLAlchemyJobStore(url='sqlite:///data/jobs.sqlite')})
-    
-    @classmethod
-    def add_job(cls, trigger: str, schedule: str, user_id: int, job_name: str, job_description: str):
-        if trigger == "cron":
-            cron = CronTrigger.from_crontab(schedule)
-            id = cls.scheduler.add_job(cls.do_task, cron, args=(user_id, job_name, job_description, trigger)).id
-        elif trigger == "date":
-            id = cls.scheduler.add_job(cls.do_task, trigger, run_date=schedule, args=(user_id, job_name, job_description, trigger)).id
-        else:
-            raise ValueError("无效的触发类型")
-        Sync.create_task(user_id, job_name, {"trigger": trigger, "schedule": schedule})
-        return id
-    
-    @classmethod
-    def remove_job(cls, user_id: int, job_name: str):
-        cls.scheduler.remove_job(users[user_id].user_data.tasks[job_name]["id"])
-        Sync.remove_task(user_id, job_name)
-    
-    @classmethod
-    def start(cls):
-        cls.scheduler.add_listener(cls.on_job_executed, EVENT_JOB_EXECUTED)
-        cls.scheduler.add_listener(cls.on_job_missed, EVENT_JOB_MISSED)
-        cls.scheduler.start()
-    
-    @classmethod
-    def shutdown(cls):
-        cls.scheduler.shutdown()
-    
-    @classmethod
-    def on_job_executed(cls, event):
-        job = cls.scheduler.get_job(event.job_id)
-        if job and isinstance(job.trigger, DateTrigger):
-            Sync.remove_task(event.args[0], event.args[1])
-            del users[event.args[0]].user_data.tasks[event.args[1]]
-            logger.debug(f"成功回收任务 {event.args[1]}")
-    
-    @classmethod
-    def on_job_missed(cls, event):
-        job = cls.scheduler.get_job(event.job_id)
-        if job and isinstance(job.trigger, DateTrigger):
-            Sync.remove_task(event.args[0], event.args[1])
-            del users[event.args[0]].user_data.tasks[event.args[1]]
-            logger.debug(f"成功回收未执行的任务 {event.args[1]}")
-    
-    @staticmethod
-    def do_task(user_id, task_name:str, task_description: str, trigger_type: str): # TODO: a little bit better, but not perfect
-        logger.debug(f"Handling user {user_id} task {task_name}")
-        if user_id not in users: # init
-            init_user(user_id)
-        with user_locks[user_id]:
-            try:
-                task = TaskInstance(users[user_id].user_data, True)
-                task.add({"type": "text", "text": f"任务：{task_name}\n任务描述: \n{task_description}"})
-                response = task()
-            except Exception as e:
-                response = f"任务执行失败！错误信息：{str(e)}"
-            users[user_id].send_message(f"[任务 {task_name}]\n{response}")
-            if trigger_type == "date":
-                Sync.remove_task(user_id, task_name)
-                del users[user_id].user_data.tasks[task_name]

@@ -267,9 +267,7 @@ class UserData:
     user_id: int
     model: str
     vision_model: str
-    tasks: dict[str, dict]
     memory: list[str]
     thinking: bool
     enable_function: bool
     prompt_raw: str
-    task_prompt_raw: str
