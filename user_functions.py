@@ -50,7 +50,7 @@ class UserChat:
                             "enum": ["add", "remove"],
                         },
                         "memory": {
-                            "description": "要操作的记忆内容，添加时不需要时间戳，删除时需要内容必须完全匹配（包括时间戳）",
+                            "description": "要操作的记忆内容，需要完全匹配",
                             "type": "string",
                         },
                     },
@@ -98,6 +98,8 @@ class UserChat:
             tool_calls = []
             tool_responses = []
             for chunk in completion:
+                if not chunk.choices:
+                    continue
                 delta = chunk.choices[0].delta
                 if hasattr(delta, "reasoning_content") and delta.reasoning_content:
                     if not is_thinking:
@@ -186,10 +188,10 @@ class UserChat:
                     content = API.search(query=arguments_json["query"])
                 case "manageMemory":
                     if arguments_json["operation"] == "add":
-                        mem = f"[{datetime.now().strftime('%m-%d')}] {arguments_json['memory']}"
+                        mem = arguments_json["memory"]
                         self.userdata.memory.append(mem)
                         Sync.add_memory(self.userdata.user_id, mem)
-                        content = f"记忆 \"{mem}\" 已添加！"
+                        content = f"记忆已添加！"
                     elif arguments_json["operation"] == "remove":
                         try:
                             self.userdata.memory.remove(arguments_json["memory"])
