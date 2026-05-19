@@ -67,7 +67,7 @@ class UserChat:
     
     def clear(self):
         # HIGHWAY TO HELL
-        self.messages = [{"role": "system", "content": self.userdata.prompt_raw.format(memory_block="\n".join(self.userdata.memory or ["暂无记忆"]), device="QQ（使用纯文本，不使用LaTeX和表格等）", time=datetime.now().strftime("%Y-%m-%d %A"))}]
+        self.messages = [{"role": "system", "content": self.userdata.prompt_raw.format(memory_block=("\n".join(f"- {p}" if i == 0 else f"  {p}" for item in self.user.memory for i, p in enumerate(item.split("\n")))) if self.user.memory else "暂无记忆", device="QQ（使用纯文本，不使用LaTeX和表格等）", time=datetime.now().strftime("%Y-%m-%d %A"))}]
         self.contain_image = False
     
     def _ai(self):
