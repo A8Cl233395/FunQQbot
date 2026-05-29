@@ -3,7 +3,6 @@ from user_functions import *
 def hook_init(self: "Handle_private_message", config: dict):
     # self.config # 当前用户配置 dict
     self.command_check_prompt = config["COMMAND_CHECK_PROMPT"]
-    self.command_output_mapping = config["COMMAND_OUTPUT_MAPPING"]
     if not os.path.exists(f"data/users/{self.user_id}.json"):
         data = {
             "thinking": config["ENABLE_THINKING_DEFAULT"],
@@ -34,35 +33,43 @@ def hook_on_message_receive(self: Handle_private_message, messages):
         try:
             commands: list = json.loads(commands)
             if len(commands) == 0:
-                self.send_message(self.command_output_mapping["unknown"])
+                self.send_message("可用指令：\n清除聊天记录\n开启/关闭函数调用\n开启/关闭思考模式\n网页聊天\n重置密码")
             else:
                 for command in commands:
                     match command:
                         case "clear":
                             self.chat_instance.clear()
-                            self.send_message(self.command_output_mapping[command])
+                            self.send_message("聊天记录已清除")
                         case "enable_function":
                             self.user_data.enable_function = True
-                            self.send_message(self.command_output_mapping[command])
+                            self.send_message("已开启函数调用")
                         case "disable_function":
                             self.user_data.enable_function = False
-                            self.send_message(self.command_output_mapping[command])
+                            self.send_message("已关闭函数调用")
                         case "enable_thinking":
                             self.user_data.thinking = True
-                            self.send_message(self.command_output_mapping[command])
+                            self.send_message("已开启思考模式")
                         case "disable_thinking":
                             self.user_data.thinking = False
-                            self.send_message(self.command_output_mapping[command])
-                        case "get_web_token":
-                            if ALLOW_GET_WEB_TOKEN:
-                                token = API.get_web_token(self.user_id)
-                                self.send_message("已获取网页聊天登录密钥（请勿泄露或展示）")
-                                self.send_message(token)
-                                self.send_message(f"可以前往 {REMOTE_API_URL}/webchat 进行网页版聊天")
+                            self.send_message("已关闭思考模式")
+                        case "webchat":
+                            if ALLOW_WEBCHAT:
+                                result = API.check_webchat_password(self.user_id)
+                                if result:
+                                    self.send_message("第一次使用网页聊天？这是你的初始密码：")
+                                    self.send_message(result)
+                                self.send_message(f"你可以前往 {REMOTE_API_URL}/webchat 进行网页版聊天")
+                                self.send_message("如果需要重置，请发送 \"重置密码\"")
+                        case "reset_password":
+                            if ALLOW_WEBCHAT:
+                                result = API.reset_webchat_password(self.user_id)
+                                if result:
+                                    self.send_message("你的新密码是：")
+                                    self.send_message(result)
                             else:
                                 self.send_message("该功能未开启")
                         case _:
-                            self.send_message(self.command_output_mapping["unknown"])
+                            self.send_message("可用指令：\n清除聊天记录\n开启/关闭函数调用\n开启/关闭思考模式\n网页聊天\n重置密码")
                             break
         except json.JSONDecodeError:
             self.send_message("指令内容包含提示词注入")
