@@ -189,14 +189,21 @@ class UserChat:
                 case "manageMemory":
                     if arguments_json["operation"] == "add":
                         mem = arguments_json["memory"]
-                        self.userdata.memory.append(mem)
-                        Sync.add_memory(self.userdata.user_id, mem)
-                        content = f"记忆已添加！"
+                        if len(mem) > 100:
+                            content = "记忆长度不能超过100个字符！"
+                        elif mem in self.userdata.memory:
+                            content = f"记忆已存在！"
+                        elif len(self.userdata.memory) >= 50:
+                            content = f"记忆已满！"
+                        else:
+                            self.userdata.memory.append(mem)
+                            Sync.add_memory(self.userdata.user_id, mem)
+                            content = f"记忆已添加！"
                     elif arguments_json["operation"] == "remove":
                         try:
                             self.userdata.memory.remove(arguments_json["memory"])
                             Sync.remove_memory(self.userdata.user_id, arguments_json["memory"])
-                            content = f"记忆 \"{arguments_json['memory']}\" 已删除！"
+                            content = f"记忆已删除！"
                         except ValueError:
                             content = f"记忆 {arguments_json['memory']} 不存在！"
                 case _:
@@ -243,6 +250,13 @@ class UserChat:
             else:
                 image_messages.append(message)
         self.messages[-1]["content"] = image_messages + [{"type": "text", "text": "\n\n".join([i["text"] for i in text_messages])}]
+    
+    def crop(self): # 当消息数量超过40时，裁剪到20个，包括一条系统消息 # TODO: 把硬裁剪改为压缩
+        if len(self.messages) > 61:
+            while len(self.messages) > 21:
+                self.messages.pop(0)
+                while self.messages[1]["role"] != "user":
+                    self.messages.pop(0)
 
 class Sync:
     URI = REMOTE_WEBSOCKET_URI
