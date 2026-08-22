@@ -168,8 +168,11 @@ class UserChat:
     
     def clear(self):
         # HIGHWAY TO HELL
-        self.messages = [{"role": "system", "content": self.userdata.prompt_raw.format(memory_block=("\n".join(f"- {p}" if i == 0 else f"  {p}" for item in self.userdata.memory for i, p in enumerate(item.split("\n")))) if self.userdata.memory else "暂无记忆", device="QQ（使用纯文本，不使用LaTeX和表格等）", time=datetime.now().strftime("%Y-%m-%d %A"))}]
+        self.messages = [{"role": "system", "content": self._build_system_message()}]
         self.contain_image = False
+
+    def _build_system_message(self):
+        return self.userdata.prompt_raw.format(memory_block=("\n".join(f"- {p}" if i == 0 else f"  {p}" for item in self.userdata.memory for i, p in enumerate(item.split("\n")))) if self.userdata.memory else "暂无记忆", device="QQ（使用纯文本，不使用LaTeX和表格等）", time=datetime.now().strftime("%Y-%m-%d %A"))
     
     def _stream_events(self, model, thinking, enable_function):
         """三种协议（chat-completions / responses / anthropic）归一化后的流式事件，chat-completions 为主要格式"""
@@ -432,12 +435,22 @@ class UserChat:
                 image_messages.append(message)
         self.messages[-1]["content"] = image_messages + [{"type": "text", "text": "\n\n".join([i["text"] for i in text_messages])}]
     
-    def crop(self): # 当消息数量超过40时，裁剪到20个，包括一条系统消息 # TODO: 把硬裁剪改为压缩
-        if len(self.messages) > 61:
-            while len(self.messages) > 21:
-                self.messages.pop(1)
-                while len(self.messages) > 2 and self.messages[1]["role"] != "user":
-                    self.messages.pop(1)
+    def crop(self, force: bool = False): # 当消息数量超过100时，裁剪到5个，包括一条系统消息
+        if force or len(self.messages) > 100:
+            self.messages.pop(0) # 移除系统消息
+            while len(self.messages) > 4:
+                self.messages.pop(0)
+                while self.messages and self.messages[0]["role"] != "user":
+                    self.messages.pop(0)
+            self.messages.insert(0, {"role": "system", "content": self._build_system_message()})
+
+            self.contain_image = False
+            for message in self.messages:
+                if message["role"] == "user":
+                    for item in message["content"]:
+                        if item["type"] == "image_url":
+                            self.contain_image = True
+                            break
 
 class Sync:
     URI = REMOTE_WEBSOCKET_URI

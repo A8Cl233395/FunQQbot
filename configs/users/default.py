@@ -25,9 +25,8 @@ def hook_init(self: "Handle_private_message", config: dict):
     self.last_message_time = time.time()
     self.command_check_model = config["COMMAND_CHECK_MODEL"]
 
-def hook_on_message_receive(self: Handle_private_message, messages):
-    self.last_message_time = time.time()
-    plain_text = process_first_message_text(messages)
+def hook_on_message_receive(self: Handle_private_message, data):
+    plain_text = process_first_message_text(data)
     if plain_text.startswith("/"):
         commands = Bigmodel.ask_ai_json(self.command_check_prompt, plain_text[1:], model=self.command_check_model)
         try:
@@ -76,12 +75,20 @@ def hook_on_message_receive(self: Handle_private_message, messages):
         except Exception as e:
             logger.error(f"指令处理出现错误: {e}")
             self.send_message(f"指令处理出现错误")
-    else:
-        chat(self, messages)
+    else: # 聊天
+        time_interval = time.time() - self.last_message_time
+        if time_interval > 3500:
+            self.chat_instance.clear() # 超过1小时，清除聊天记录
+        elif time_interval > 1700:
+            self.chat_instance.crop(force=True) # 超过30分钟，强制裁剪到五条（约两轮）
+        else:
+            self.chat_instance.crop()
+        self.last_message_time = time.time()
+        chat(self, data)
 
-def hook_on_input(self: Handle_private_message):
+def hook_on_input(self: Handle_private_message): # 不保证能触发，有人关闭了这个功能
     # message_send # 要发送的消息 list
-    if time.time() - self.last_message_time > 1800:
+    if time.time() - self.last_message_time > 3500:
         self.last_message_time = time.time()
         self.chat_instance.clear()
         self.send_message("聊聊新话题~")
@@ -91,9 +98,9 @@ def hook_on_quit(self: Handle_private_message):
     with open(f"data/users/{self.user_id}.json", "w", encoding="utf-8") as f:
         json.dump({"thinking": self.user_data.thinking, "enable_function": self.user_data.enable_function, "memory": self.user_data.memory}, f, ensure_ascii=False)
 
-def chat(self: Handle_private_message, messages):
+def chat(self: Handle_private_message, data):
     contains_text = False
-    for message in messages["message"]:
+    for message in data["message"]:
         match message["type"]:
             case "text":
                 contains_text = True
@@ -112,8 +119,9 @@ def chat(self: Handle_private_message, messages):
             case "video":
                 self.chat_instance.add({"type": "text", "text": "<视频>"})
             case "record":
-                contains_text = False
-                self.chat_instance.add({"type": "text", "text": "<无法识别的语音>"})
+                contains_text = True
+                text = NapcatAPI.transcribe(data["message_id"]) # 此处为data，最上层
+                self.chat_instance.add({"type": "text", "text": text})
             case "reply":
                 reply_data = NapcatAPI.get_message(message["data"]["id"])
                 text = messages_to_text(reply_data)[1]
@@ -167,12 +175,8 @@ def messages_to_text(data) -> tuple[str, str]:
             case "video":
                 output_text += "\n<视频>"
             case "record":
-                if ENABLE_STT:
-                    url = message["data"]["url"]
-                    text = API.transcribe(url)
-                    output_text += f"\n{text}"
-                else:
-                    output_text += "\n<语音>"
+                text = NapcatAPI.transcribe(data["message_id"]) # 此处为data，最上层
+                output_text += f"\n{text}"
             case "reply":
                 reply_data = NapcatAPI.get_message(message["data"]["id"])
                 if reply_data:

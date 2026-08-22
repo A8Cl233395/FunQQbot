@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass
 from base_settings import *
 import json
+import time
 
 class LRUCache:
     def __init__(self, capacity=50, allow_reverse=False):
@@ -221,121 +222,135 @@ def thinking_params(model_config: dict, thinking: bool, api_type: str = "chat-co
     return {"reasoning_effort": thinking_config["effort"]}
 
 class API:
-    api = REMOTE_API_URL
+    uri = REMOTE_API_URL
     key = REMOTE_API_KEY
     session = requests.Session()
 
-    @staticmethod
-    def search(query: str) -> str:
-        response = API.session.get(f"{API.api}/search", headers={"key": API.key}, params={"q": query})
+    @classmethod
+    def search(cls, query: str) -> str:
+        response = cls.session.get(f"{cls.uri}/search", headers={"key": cls.key}, params={"q": query})
         return response.text
     
-    @staticmethod
-    def read(url: str) -> str:
-        response = API.session.get(f"{API.api}/read/{url}", headers={"key": API.key})
+    @classmethod
+    def read(cls, url: str) -> str:
+        response = cls.session.get(f"{cls.uri}/read/{url}", headers={"key": cls.key})
         return response.text
     
-    @staticmethod
-    def ocr(url: str) -> str:
-        response = API.session.get(f"{API.api}/ocr", headers={"key": API.key}, params={"url": url})
+    @classmethod
+    def ocr(cls, url: str) -> str:
+        response = cls.session.get(f"{cls.uri}/ocr", headers={"key": cls.key}, params={"url": url})
         return response.text
     
-    @staticmethod
-    def transcribe(url: str) -> str:
-        response = API.session.get(f"{API.api}/voicerecognition", headers={"key": API.key}, params={"url": url})
-        return response.text
+    # @classmethod
+    # def transcribe(cls, url: str) -> str:
+    #     response = cls.session.get(f"{cls.api}/voicerecognition", headers={"key": cls.key}, params={"url": url})
+    #     return response.text
     
-    @staticmethod
-    def bilibili(bv=None, url=None) -> str:
+    @classmethod
+    def bilibili(cls, bv=None, url=None) -> str:
         if bv is not None:
-            return API._bilibili_bv(bv)
+            return cls._bilibili_bv(bv)
         elif url is not None:
-            return API._bilibili_url(url)
+            return cls._bilibili_url(url)
         else:
             return "请输入 bv 或 url 参数！"
     
-    @staticmethod
-    def _bilibili_bv(bv: str) -> str:
-        response = API.session.get(f"{API.api}/bilibilivideo", headers={"key": API.key}, params={"bv": bv})
+    @classmethod
+    def _bilibili_bv(cls, bv: str) -> str:
+        response = cls.session.get(f"{cls.uri}/bilibilivideo", headers={"key": cls.key}, params={"bv": bv})
         return response.text
 
-    @staticmethod
-    def _bilibili_url(url: str) -> str:
-        response = API.session.get(f"{API.api}/bilibilivideo", headers={"key": API.key}, params={"url": url})
+    @classmethod
+    def _bilibili_url(cls, url: str) -> str:
+        response = cls.session.get(f"{cls.uri}/bilibilivideo", headers={"key": cls.key}, params={"url": url})
         return response.text
     
-    @staticmethod
-    def ncm(id=None, url=None) -> str:
+    @classmethod
+    def ncm(cls, id=None, url=None) -> str:
         if id is not None:
-            return API._ncm_id(id)
+            return cls._ncm_id(id)
         elif url is not None:
-            return API._ncm_url(url)
+            return cls._ncm_url(url)
         else:
             return "请输入 id 或 url 参数！"
     
-    @staticmethod
-    def _ncm_id(id: str) -> str:
-        response = API.session.get(f"{API.api}/ncmlyric", headers={"key": API.key}, params={"id": id})
+    @classmethod
+    def _ncm_id(cls, id: str) -> str:
+        response = cls.session.get(f"{cls.uri}/ncmlyric", headers={"key": cls.key}, params={"id": id})
         return response.text
 
-    @staticmethod
-    def _ncm_url(url: str) -> str:
-        response = API.session.get(f"{API.api}/ncmlyric", headers={"key": API.key}, params={"url": url})
+    @classmethod
+    def _ncm_url(cls, url: str) -> str:
+        response = cls.session.get(f"{cls.uri}/ncmlyric", headers={"key": cls.key}, params={"url": url})
         return response.text
     
-    @staticmethod
-    def verify_friend_request_token(qqid: int, token: str) -> bool:
-        response = API.session.get(f"{API.api}/invitecheck", headers={"key": API.key}, params={"qqid": qqid, "token": token})
+    @classmethod
+    def verify_friend_request_token(cls, qqid: int, token: str) -> bool:
+        response = cls.session.get(f"{cls.uri}/invitecheck", headers={"key": cls.key}, params={"qqid": qqid, "token": token})
         return response.json()
 
-    @staticmethod
-    def check_webchat_password(uid: int) -> bool | str:
-        response = API.session.get(f"{API.api}/checkpwd", headers={"key": API.key}, params={"uid": uid})
+    @classmethod
+    def check_webchat_password(cls, uid: int) -> bool | str:
+        response = cls.session.get(f"{cls.uri}/checkpwd", headers={"key": cls.key}, params={"uid": uid})
         return response.text if response.status_code == 200 else False
     
-    @staticmethod
-    def reset_webchat_password(uid: int) -> str:
-        response = API.session.get(f"{API.api}/resetpwd", headers={"key": API.key}, params={"uid": uid})
+    @classmethod
+    def reset_webchat_password(cls, uid: int) -> str:
+        response = cls.session.get(f"{cls.uri}/resetpwd", headers={"key": cls.key}, params={"uid": uid})
         return response.text
 
 class NapcatAPI:
     username_cache = LRUCache(128)
+    uri = "http://127.0.0.1:3001"
+    session = requests.Session()
 
-    @staticmethod
-    def get_username(id):
-        if NapcatAPI.username_cache.check(id):
-            return NapcatAPI.username_cache.get(id)
+    @classmethod
+    def get_username(cls, id):
+        if cls.username_cache.check(id):
+            return cls.username_cache.get(id)
         try:
-            result = requests.post("http://127.0.0.1:3001/get_stranger_info", json={"user_id": id}).json()
+            result = cls.session.post(f"{cls.uri}/get_stranger_info", json={"user_id": id}).json()
             data = result["data"]["nick"]
-            NapcatAPI.username_cache.put(id, data)
+            cls.username_cache.put(id, data)
         except:
             data = "QQ用户"
         return data
     
-    @staticmethod
-    def get_message(id):
-        result = requests.post("http://127.0.0.1:3001/get_msg", json={"message_id": id}).json()
+    @classmethod
+    def get_message(cls, id):
+        result = cls.session.post(cls.uri + "/get_msg", json={"message_id": id}).json()
         return result["data"]
+
+    @classmethod
+    def transcribe(cls, message_id: str | int) -> str:
+        start_time = time.time()
+        while time.time() - start_time < 10:
+            response = cls.session.post(f"{cls.uri}/fetch_ptt_text", json={"message_id": message_id}).json()
+            if response["status"] == "ok":
+                return response["data"]["text"]
+            elif response["status"] == "failed":
+                if response["wording"] == "消息不存在":
+                    return "<消息不存在>"
+                time.sleep(0.2)
+        return "<获取语音消息超时>"
 
 class Utils:
     oclients = {}
-
-    @staticmethod
-    def oclient(model) -> OpenAI:
-        url = MODELS[model]["url"]
-        if url not in Utils.oclients:
-            Utils.oclients[url] = OpenAI(api_key=MODELS[model]["api_key"], base_url=MODELS[model]["url"])
-        return Utils.oclients[url]
-
     aclients = {}
 
-    @staticmethod
-    def aclient(model) -> Anthropic:
+    @classmethod
+    def oclient(cls, model) -> OpenAI:
         url = MODELS[model]["url"]
-        if url not in Utils.aclients:
-            Utils.aclients[url] = Anthropic(api_key=MODELS[model]["api_key"], base_url=MODELS[model]["url"])
-        return Utils.aclients[url]
+        if url not in cls.oclients:
+            cls.oclients[url] = OpenAI(api_key=MODELS[model]["api_key"], base_url=MODELS[model]["url"])
+        return cls.oclients[url]
+
+    @classmethod
+    def aclient(cls, model) -> Anthropic:
+        url = MODELS[model]["url"]
+        if url not in cls.aclients:
+            cls.aclients[url] = Anthropic(api_key=MODELS[model]["api_key"], base_url=MODELS[model]["url"])
+        return cls.aclients[url]
     
     @staticmethod
     def url_to_b64(url: str, compress: int = 80, max_width: int = 1024, max_height: int = 1024) -> str:

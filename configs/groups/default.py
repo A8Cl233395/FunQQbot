@@ -85,12 +85,8 @@ def messages_to_text(data, self_name) -> tuple[str, str, bool]:
             case "video":
                 output_text += "\n<视频>"
             case "record":
-                if ENABLE_STT:
-                    url = message["data"]["url"]
-                    text = API.transcribe(url)
-                    output_text += f"\n{text}"
-                else:
-                    output_text += "\n<语音>"
+                text = NapcatAPI.transcribe(message["data"]["id"])
+                output_text += f"\n{text}"
             case "at":
                 qq_id = message["data"]["qq"]
                 if qq_id == SELF_ID_STR:

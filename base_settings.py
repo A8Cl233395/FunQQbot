@@ -23,7 +23,6 @@ REMOTE_API_URL: str = base_config["REMOTE_API_URL"]
 REMOTE_WEBSOCKET_URI: str = base_config["REMOTE_WEBSOCKET_URI"]
 REMOTE_API_KEY: str = base_config["REMOTE_API_KEY"]
 ENABLE_OCR: bool = base_config["ENABLE_OCR"]
-ENABLE_STT: bool = base_config["ENABLE_STT"]
 MODELS: dict = base_config["MODELS"]
 SELF_ID: int = base_config["SELF_ID"]
 SELF_ID_STR: str = str(SELF_ID)
@@ -46,9 +45,6 @@ try:
         exit(1)
     if ENABLE_OCR and not service_status["ocr"]:
         logger.critical("远程API OCR 功能未开启！")
-        exit(1)
-    if ENABLE_STT and not service_status["transcribe"]:
-        logger.critical("远程API 语音转文字 功能未开启！")
         exit(1)
     if REMOTE_WEBSOCKET_URI and not service_status["link"]:
         logger.critical("远程API 同步 功能未开启！")
