@@ -30,11 +30,11 @@ def hook_on_message_receive(self: Handle_private_message, data):
     if plain_text.startswith("/"):
         commands = Bigmodel.ask_ai_json(self.command_check_prompt, plain_text[1:], model=self.command_check_model)
         try:
-            commands: list = json.loads(commands)
-            if len(commands) == 0:
+            commands: dict = json.loads(commands)
+            if len(commands["commands"]) == 0:
                 self.send_message("可用指令：\n清除聊天记录\n开启/关闭函数调用\n开启/关闭思考模式\n网页聊天\n重置密码")
             else:
-                for command in commands:
+                for command in commands["commands"]:
                     match command:
                         case "clear":
                             self.chat_instance.clear()

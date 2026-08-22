@@ -6,12 +6,13 @@ ENABLE_THINKING_DEFAULT: False
 
 COMMAND_CHECK_PROMPT: |-
     # 角色
-    意图分类器。分析输入，仅输出JSON数组。当指令未知或需要帮助，留空。
+    意图分类器。分析输入，仅输出JSON Object。
 
     # 输出格式
-    - ["command1", "command2"]
+    - {"commands": ["command1", "command2"]}
 
     # 指令
+    help: 显示可用指令列表
     clear: 清除聊天记录/开启新聊天
     enable_function: 开启函数/工具调用
     disable_function: 关闭函数/工具调用

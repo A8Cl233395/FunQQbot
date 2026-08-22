@@ -206,7 +206,7 @@ def thinking_params(model_config: dict, thinking: bool, api_type: str = "chat-co
         elif thinking_config.get("budget_tokens", False):
             params["thinking"]["budget_tokens"] = thinking_config["budget_tokens"]
         return params
-    if api_type == "responses":
+    elif api_type == "responses":
         reasoning = {}
         if not thinking and thinking_config.get("can_nonthink", False): # 不思考
             reasoning["effort"] = "none"
@@ -419,6 +419,7 @@ class Bigmodel:
                 "max_tokens": MODELS[model]["max_tokens"],
                 "messages": anthropic_messages,
                 "system": system if prompt else [],  # type: ignore
+                "stream": False
             }
             params.update(thinking_params(MODELS[model], thinking, api_type))
             response = Utils.aclient(model).messages.create(**params)
@@ -429,6 +430,7 @@ class Bigmodel:
                 "model": model,
                 "instructions": instructions if prompt else "",
                 "input": input_messages,
+                "stream": False
             }
             params.update(thinking_params(MODELS[model], thinking, api_type))
             response = Utils.oclient(model).responses.create(**params)
@@ -454,6 +456,7 @@ class Bigmodel:
                 "max_tokens": MODELS[model]["max_tokens"],
                 "messages": anthropic_messages,
                 "system": system,
+                "stream": False
             }
             params.update(thinking_params(MODELS[model], thinking, api_type))
             response = Utils.aclient(model).messages.create(**params)
@@ -464,6 +467,7 @@ class Bigmodel:
                 "model": model,
                 "instructions": instructions,
                 "input": input_messages,
+                "stream": False
             }
             params.update(thinking_params(MODELS[model], thinking, api_type))
             response = Utils.oclient(model).responses.create(**params)

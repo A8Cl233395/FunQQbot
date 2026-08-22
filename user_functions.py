@@ -192,7 +192,9 @@ class UserChat:
             "stream": True
         }
         if enable_function:
-            params["tools"] = UserChat.tools
+            params["tools"] = self.tools
+        if "max_tokens" in model_config:
+            params["max_completion_tokens"] = model_config["max_tokens"]
         params.update(thinking_params(model_config, thinking, "chat-completions"))
         client = self.vision_oclient if self.contain_image else self.oclient
         completion = client.chat.completions.create(**params)
@@ -222,7 +224,9 @@ class UserChat:
             "stream": True,
         }
         if enable_function:
-            params["tools"] = UserChat.responses_tools
+            params["tools"] = self.responses_tools
+        if "max_tokens" in model_config:
+            params["max_output_tokens"] = model_config["max_tokens"]
         params.update(thinking_params(model_config, thinking, "responses"))
         client = self.vision_oclient if self.contain_image else self.oclient
         completion = client.responses.create(**params)
@@ -256,7 +260,7 @@ class UserChat:
             "max_tokens": model_config["max_tokens"],
         }
         if enable_function:
-            params["tools"] = UserChat.anthropic_tools
+            params["tools"] = self.anthropic_tools
         params.update(thinking_params(model_config, thinking, "anthropic"))
         client = Utils.aclient(model)
         tool_indices = {}
