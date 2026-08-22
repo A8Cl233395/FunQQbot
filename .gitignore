@@ -10,3 +10,6 @@ configs/**
 !configs/users/default.py
 !configs/base-template.yaml
 jobs.sqlite
+AGENTS.md
+data/users/**
+data/desynchronized.json

@@ -16,40 +16,68 @@ SELF_ID: 123456789
 # 大模型配置
 MODELS:
   deepseek-v4-flash:
-    api_key: sk-xxx
-    default-thinking: true
-    thinking-extra-body:
-      'false':
-        thinking:
-          type: disabled
-      'true':
-        thinking:
-          type: enabled
-    url: https://api.deepseek.com/
+    api_type: chat-completions
+    desc: "Deepseek V4 Flash"
+    thinking:
+      can_nonthink: true
+      effort: high
+    api_key: xxx
+    url: https://opencode.ai/zen/go/v1
+  deepseek-v4-pro:
+    api_type: chat-completions
+    desc: "Deepseek V4 Pro"
+    api_key: xxx
+    url: https://opencode.ai/zen/go/v1
   kimi-k2.6:
+    api_type: chat-completions
     desc: "Kimi K2.6"
-    api_key: sk-xxx
-    default-thinking: true
-    thinking-extra-body:
-      'false':
-        thinking:
-          type: disabled
-      'true':
-        thinking:
-          type: enabled
-          keep: all
-    url: https://api.moonshot.cn/v1
-  qwen3.6-plus:
-    desc: "Qwen3.6 Plus"
-    api_key: sk-xxx
-    default-thinking: true
-    thinking-extra-body:
-      'false':
-        enable_thinking: false
-      'true':
-        enable_thinking: true
-        preserve_thinking: true
+    vision: true
+    api_key: xxx
+    url: https://opencode.ai/zen/go/v1
+  qwen3.7-plus:
+    api_type: anthropic
+    vision: true
+    desc: "Qwen3.7 Plus"
+    max_tokens: 8192
+    thinking:
+      can_nonthink: true
+      on_param: enabled
+      effort: high
+    api_key: xxx
+    url: https://opencode.ai/zen/go
+  gpt-5.6-luna:
+    api_type: responses
+    desc: "GPT-5.6 Luna"
+    vision: true
+    thinking:
+      can_nonthink: true
+      effort: high
+      request_summary: true
+    api_key: xxx
+    url: https://opencode.ai/zen/go/v1
+  minimax-m3:
+    api_type: anthropic
+    desc: "Minimax M3"
+    max_tokens: 8192
+    vision: true
+    thinking:
+      can_nonthink: true
+      on_param: adaptive
+    api_key: xxx
+    url: https://opencode.ai/zen/go
+  qwen3.7-flash:
+    api_type: chat-completions
+    desc: "Qwen3.7 Flash"
+    hidden: true
+    thinking:
+      extra_body:
+        'true':
+          enable_thinking: true
+        'false':
+          enable_thinking: false
+    api_key: xxx
     url: https://dashscope.aliyuncs.com/compatible-mode/v1
+
 
 LOG_LEVEL: INFO # 日志级别（DEBUG, INFO, WARNING, ERROR, CRITICAL）
 

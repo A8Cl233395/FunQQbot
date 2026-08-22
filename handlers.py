@@ -1,4 +1,5 @@
 import importlib
+import importlib.util
 from types import ModuleType
 import threading
 import time
@@ -9,6 +10,17 @@ import websockets
 from custom_functions import *
 
 username_cache = LRUCache(500, allow_reverse=True)
+
+default_modules: dict[str, ModuleType] = {}
+
+def load_default_module(module_name: str, script_path: str) -> ModuleType:
+    """加载 default 脚本并缓存，避免每个群/用户重复 exec。{id}.py 不受缓存影响。"""
+    if script_path not in default_modules:
+        spec = importlib.util.spec_from_file_location(module_name, script_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        default_modules[script_path] = module
+    return default_modules[script_path]
 
 class Handle_group_message:
     """群消息处理类"""
@@ -29,12 +41,15 @@ class Handle_group_message:
 
     def load_custom_script(self) -> ModuleType | None:
         """动态加载对应的群组脚本"""
-        script_path = f"configs/groups/{self.group_id}.py"
-        script_path = script_path if os.path.exists(script_path) else "configs/groups/default.py"
+        specific_path = f"configs/groups/{self.group_id}.py"
+        script_path = specific_path if os.path.exists(specific_path) else "configs/groups/default.py"
         try:
-            spec = importlib.util.spec_from_file_location(f"custom_group_module_{self.group_id}", script_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
+            if script_path == specific_path:
+                spec = importlib.util.spec_from_file_location(f"custom_group_module_{self.group_id}", script_path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+            else:
+                module = load_default_module("custom_group_default", script_path)
             if not hasattr(module, "hook_init"):
                 logger.warning("[%s] 自定义脚本缺少 hook_init 函数", self.group_id)
             elif not hasattr(module, "hook_on_message_receive"):
@@ -87,12 +102,15 @@ class Handle_private_message:
     
     def load_custom_script(self) -> ModuleType | None:
         """动态加载对应的群组脚本"""
-        script_path = f"configs/users/{self.user_id}.py"
-        script_path = script_path if os.path.exists(script_path) else "configs/users/default.py"
+        specific_path = f"configs/users/{self.user_id}.py"
+        script_path = specific_path if os.path.exists(specific_path) else "configs/users/default.py"
         try:
-            spec = importlib.util.spec_from_file_location(f"custom_private_module_{self.user_id}", script_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
+            if script_path == specific_path:
+                spec = importlib.util.spec_from_file_location(f"custom_private_module_{self.user_id}", script_path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+            else:
+                module = load_default_module("custom_private_default", script_path)
             if not hasattr(module, "hook_init"):
                 logger.warning("[%s] 自定义脚本缺少 hook_init 函数", self.user_id)
             elif not hasattr(module, "hook_on_message_receive"):

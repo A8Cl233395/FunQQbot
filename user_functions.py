@@ -59,6 +59,107 @@ class UserChat:
             },
         }
     ]
+    responses_tools = [
+        {
+            "type": "function",
+            "name": "searchWeb",
+            "description": "进行网络搜索",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "description": "查询的内容",
+                        "type": "string",
+                    },
+                },
+                "required": ["query"]
+            },
+        },
+        {
+            "type": "function",
+            "name": "readURL",
+            "description": "访问指定URL",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "description": "访问的URL",
+                        "type": "string",
+                    },
+                },
+                "required": ["url"]
+            },
+        },
+        {
+            "type": "function",
+            "name": "manageMemory",
+            "description": "管理永久记忆，此处的记忆会持久化存储",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "operation": {
+                        "description": "操作",
+                        "type": "string",
+                        "enum": ["add", "remove"],
+                    },
+                    "memory": {
+                        "description": "要操作的记忆内容，需要完全匹配",
+                        "type": "string",
+                    },
+                },
+                "required": ["operation", "memory"]
+            },
+        }
+    ]
+    anthropic_tools = [
+        {
+            "name": "searchWeb",
+            "description": "进行网络搜索",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "description": "查询的内容",
+                        "type": "string",
+                    },
+                },
+                "required": ["query"]
+            },
+        },
+        {
+            "name": "readURL",
+            "description": "访问指定URL",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "description": "访问的URL",
+                        "type": "string",
+                    },
+                },
+                "required": ["url"]
+            },
+        },
+        {
+            "name": "manageMemory",
+            "description": "管理永久记忆，此处的记忆会持久化存储",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "operation": {
+                        "description": "操作",
+                        "type": "string",
+                        "enum": ["add", "remove"],
+                    },
+                    "memory": {
+                        "description": "要操作的记忆内容，需要完全匹配",
+                        "type": "string",
+                    },
+                },
+                "required": ["operation", "memory"]
+            },
+        }
+    ]
     def __init__(self, userdata: UserData):
         self.userdata = userdata
         self.oclient = Utils.oclient(userdata.model)
@@ -70,85 +171,165 @@ class UserChat:
         self.messages = [{"role": "system", "content": self.userdata.prompt_raw.format(memory_block=("\n".join(f"- {p}" if i == 0 else f"  {p}" for item in self.userdata.memory for i, p in enumerate(item.split("\n")))) if self.userdata.memory else "暂无记忆", device="QQ（使用纯文本，不使用LaTeX和表格等）", time=datetime.now().strftime("%Y-%m-%d %A"))}]
         self.contain_image = False
     
-    def _ai(self):
+    def _stream_events(self, model, thinking, enable_function):
+        """三种协议（chat-completions / responses / anthropic）归一化后的流式事件，chat-completions 为主要格式"""
+        api_type = MODELS[model].get("api_type", "chat-completions")
+        if api_type == "responses":
+            yield from self._ai_responses(model, thinking, enable_function)
+        elif api_type == "anthropic":
+            yield from self._ai_anthropic(model, thinking, enable_function)
+        else:
+            yield from self._ai_completions(model, thinking, enable_function)
+
+    def _ai_completions(self, model, thinking, enable_function):
+        model_config = MODELS[model]
         params = {
-            "model": self.userdata.vision_model if self.contain_image else self.userdata.model,
+            "model": model,
             "messages": self.messages,
             "stream": True
         }
-        if self.userdata.enable_function:
+        if enable_function:
             params["tools"] = UserChat.tools
-        if "thinking-extra-body" in MODELS[self.userdata.model]:
-            if self.userdata.thinking:
-                params["extra_body"] = MODELS[self.userdata.model]["thinking-extra-body"]["true"]
-            else:
-                params["extra_body"] = MODELS[self.userdata.model]["thinking-extra-body"]["false"]  
+        params.update(thinking_params(model_config, thinking, "chat-completions"))
         client = self.vision_oclient if self.contain_image else self.oclient
         completion = client.chat.completions.create(**params)
-        return completion
+        for chunk in completion:
+            if not chunk.choices: # wdnmd小米
+                continue
+            delta = chunk.choices[0].delta
+            if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                yield StreamEvent("thinking", text=delta.reasoning_content)
+            if hasattr(delta, "content") and delta.content: # wdnmd阿里
+                yield StreamEvent("content", text=delta.content)
+            if hasattr(delta, "tool_calls") and delta.tool_calls:
+                for tool_call in delta.tool_calls:
+                    if tool_call.id and tool_call.function.name: # 新的tool call
+                        yield StreamEvent("tool_start", index=tool_call.index, call_id=tool_call.id, name=tool_call.function.name)
+                    if tool_call.function.arguments:
+                        yield StreamEvent("tool_args", index=tool_call.index, text=tool_call.function.arguments)
+
+    def _ai_responses(self, model, thinking, enable_function):
+        # responses API 不接受 system role 消息，system 提出到 instructions 参数
+        model_config = MODELS[model]
+        instructions, input_messages = prepare_responses_messages(self.messages)
+        params = {
+            "model": model,
+            "input": input_messages,
+            "instructions": instructions,
+            "stream": True,
+        }
+        if enable_function:
+            params["tools"] = UserChat.responses_tools
+        params.update(thinking_params(model_config, thinking, "responses"))
+        client = self.vision_oclient if self.contain_image else self.oclient
+        completion = client.responses.create(**params)
+        call_indices: dict[str, int] = {}
+        call_index = 0
+        for event in completion:
+            match event.type:
+                case "response.output_item.added":
+                    item = event.item
+                    if item.type == "function_call":
+                        call_indices[item.id] = call_index
+                        yield StreamEvent("tool_start", index=call_index, call_id=item.call_id, name=item.name)
+                        call_index += 1
+                case "response.function_call_arguments.delta":
+                    yield StreamEvent("tool_args", index=call_indices[event.item_id], text=event.delta)
+                case "response.output_text.delta":
+                    yield StreamEvent("content", text=event.delta)
+                case "response.reasoning_summary_text.delta":
+                    yield StreamEvent("thinking", text=event.delta)
+                case "response.reasoning_text.delta":
+                    yield StreamEvent("thinking", text=event.delta)
+
+    def _ai_anthropic(self, model, thinking, enable_function):
+        # anthropic 协议不接受 system role 消息，system 提出到顶层参数
+        model_config = MODELS[model]
+        system, anthropic_messages = prepare_anthropic_messages(self.messages)
+        params = {
+            "model": model,
+            "messages": anthropic_messages,
+            "system": system,
+            "max_tokens": model_config["max_tokens"],
+        }
+        if enable_function:
+            params["tools"] = UserChat.anthropic_tools
+        params.update(thinking_params(model_config, thinking, "anthropic"))
+        client = Utils.aclient(model)
+        tool_indices = {}
+        tool_index = 0
+        with client.messages.stream(**params) as chunk_stream:
+            for event in chunk_stream:
+                if isinstance(event, ContentBlockStartEvent):
+                    if isinstance(event.content_block, ToolUseBlock):
+                        tool_indices[event.index] = tool_index
+                        yield StreamEvent("tool_start", index=tool_index, call_id=event.content_block.id, name=event.content_block.name)
+                        tool_index += 1
+                elif isinstance(event, ContentBlockDeltaEvent):
+                    if isinstance(event.delta, ThinkingDelta):
+                        yield StreamEvent("thinking", text=event.delta.thinking)
+                    elif isinstance(event.delta, TextDelta):
+                        yield StreamEvent("content", text=event.delta.text)
+                    elif isinstance(event.delta, InputJSONDelta):
+                        index = tool_indices.get(event.index)
+                        if index is not None:
+                            yield StreamEvent("tool_args", index=index, text=event.delta.partial_json)
     
     def __call__(self):
+        model = self.userdata.vision_model if self.contain_image else self.userdata.model
+        thinking = self.userdata.thinking
+        enable_function = self.userdata.enable_function
         try:
-            completion = self._ai()
             answering_content = ""
             reasoning_content = ""
             buffer = ""
             is_thinking = False
-            # is_answering = False
             tool_calls = []
             tool_responses = []
-            for chunk in completion:
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta
-                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                    if not is_thinking:
-                        is_thinking = True
-                        # yield "---Thinking---"
-                    reasoning_content += delta.reasoning_content
-                    # buffer += delta.reasoning_content
-                    # if "\n\n" in buffer:
-                    #     parts = buffer.split("\n\n", 1)
-                    #     yield parts[0].strip()
-                    #     buffer = parts[1].strip() if len(parts) > 1 else ""  # 双换行之后的内容（如果有）
-                if hasattr(delta, "content") and delta.content:
-                    # if not is_answering:
-                        # if buffer:
-                        #     yield buffer.strip()
-                        #     buffer = ""
-                        # if is_thinking:
-                        #     yield "---Answering---"
-                        # is_answering = True
-                    answering_content += delta.content
-                    buffer += delta.content
+            for ev in self._stream_events(model, thinking, enable_function):
+                if ev.kind == "thinking":
+                    is_thinking = True
+                    reasoning_content += ev.text
+                elif ev.kind == "content":
+                    answering_content += ev.text
+                    buffer += ev.text
                     if "\n\n" in buffer:
                         parts = buffer.split("\n\n", 1)
                         yield parts[0].strip()
                         buffer = parts[1].strip() if len(parts) > 1 else ""  # 双换行之后的内容（如果有）
-                if hasattr(delta, "tool_calls") and delta.tool_calls:
+                elif ev.kind == "tool_start":
                     if buffer:
                         yield buffer.strip()
                         buffer = ""
-                    for tool_call in delta.tool_calls:
-                        if tool_call.id and tool_call.function.name: # 新的tool call
-                            if tool_calls: # 处理旧的（完成生成的）tool call
-                                yield self._tool_call_json_parser(tool_calls[-1])
-                                # TODO: 懒得优化了，卡着
-                                tool_responses.append(self._handle_tool_call(tool_calls[-1]))
-                            tool_calls.append({
-                                "id": tool_call.id,
-                                "function": {
-                                    "arguments": "",
-                                    "name": tool_call.function.name,
-                                },
-                                "type": "function",
-                            })
-                            yield f"---Tool Call: {tool_call.function.name}---" if tool_call.function.name else "---Tool Call---"
-                        if tool_call.function.arguments:
-                            if tool_call.index:
-                                tool_calls[tool_call.index]["function"]["arguments"] += tool_call.function.arguments
-                            else: # 兼容gemini。gemini只有一个tool call并且index = None
-                                tool_calls[-1]["function"]["arguments"] += tool_call.function.arguments
+                    if tool_calls: # 处理旧的（完成生成的）tool call
+                        yield self._tool_call_json_parser(tool_calls[-1])
+                        tool_responses.append(self._handle_tool_call(tool_calls[-1]))
+                    if ev.index is not None:
+                        while len(tool_calls) <= ev.index:
+                            tool_calls.append(None)
+                        tool_calls[ev.index] = {
+                            "id": ev.call_id,
+                            "function": {
+                                "arguments": "",
+                                "name": ev.name,
+                            },
+                            "type": "function",
+                        }
+                    else: # 兼容gemini。gemini只有一个tool call并且index = None
+                        tool_calls.append({
+                            "id": ev.call_id,
+                            "function": {
+                                "arguments": "",
+                                "name": ev.name,
+                            },
+                            "type": "function",
+                        })
+                    yield f"---Tool Call: {ev.name}---" if ev.name else "---Tool Call---"
+                elif ev.kind == "tool_args":
+                    if ev.index is not None:
+                        tool_calls[ev.index]["function"]["arguments"] += ev.text
+                    else: # 兼容gemini。gemini只有一个tool call并且index = None
+                        tool_calls[-1]["function"]["arguments"] += ev.text
             if buffer:
                 yield buffer.strip()
             if not tool_calls:
@@ -189,8 +370,8 @@ class UserChat:
                 case "manageMemory":
                     if arguments_json["operation"] == "add":
                         mem = arguments_json["memory"]
-                        if len(mem) > 100:
-                            content = "记忆长度不能超过100个字符！"
+                        if len(mem) > 500:
+                            content = "记忆长度不能超过500个字符！"
                         elif mem in self.userdata.memory:
                             content = f"记忆已存在！"
                         elif len(self.userdata.memory) >= 50:
@@ -254,9 +435,9 @@ class UserChat:
     def crop(self): # 当消息数量超过40时，裁剪到20个，包括一条系统消息 # TODO: 把硬裁剪改为压缩
         if len(self.messages) > 61:
             while len(self.messages) > 21:
-                self.messages.pop(0)
-                while self.messages[1]["role"] != "user":
-                    self.messages.pop(0)
+                self.messages.pop(1)
+                while len(self.messages) > 2 and self.messages[1]["role"] != "user":
+                    self.messages.pop(1)
 
 class Sync:
     URI = REMOTE_WEBSOCKET_URI

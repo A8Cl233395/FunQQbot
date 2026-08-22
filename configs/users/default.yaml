@@ -1,12 +1,12 @@
 MODEL: deepseek-v4-flash # 默认模型
-VISION_MODEL: qwen3.5-plus
+VISION_MODEL: minimax-m3
 COMMAND_CHECK_MODEL: deepseek-v4-flash
 ENABLE_FUNCTION_DEFAULT: True
 ENABLE_THINKING_DEFAULT: False
 
 COMMAND_CHECK_PROMPT: |-
     # 角色
-    意图分类器。分析输入，仅输出JSON数组。当指令未知，留空。
+    意图分类器。分析输入，仅输出JSON数组。当指令未知或需要帮助，留空。
 
     # 输出格式
     - ["command1", "command2"]
@@ -18,7 +18,7 @@ COMMAND_CHECK_PROMPT: |-
     enable_thinking: 开启思考模式
     disable_thinking: 关闭思考模式
     webchat: 网页聊天
-    reset_password: 重置密码，仅在用户明确表示时使用，意图模糊时不使用
+    reset_password: 重置密码，**仅在用户明确表示时使用**，意图模糊时不使用
 
 
 CHAT_PROMPT_RAW: |-

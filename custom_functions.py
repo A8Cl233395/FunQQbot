@@ -1,11 +1,22 @@
 import base64
 from collections import OrderedDict
 from openai import OpenAI
+from anthropic import Anthropic
+from anthropic.types import (
+    ContentBlockDeltaEvent,
+    ContentBlockStartEvent,
+    InputJSONDelta,
+    TextBlock,
+    TextDelta,
+    ThinkingDelta,
+    ToolUseBlock,
+)
 from PIL import Image
 from io import BytesIO
 import re
 from dataclasses import dataclass
 from base_settings import *
+import json
 
 class LRUCache:
     def __init__(self, capacity=50, allow_reverse=False):
@@ -70,28 +81,168 @@ class LRUCache:
             return None
         return self.rev_cache.get(value)
 
+@dataclass
+class StreamEvent:
+    """三种协议（chat-completions / responses / anthropic）归一化后的流式事件"""
+    kind: str  # "thinking" | "content" | "tool_start" | "tool_args"
+    text: str = ""
+    index: int | None = None
+    call_id: str | None = None
+    name: str | None = None
+
+def prepare_responses_messages(messages: list) -> tuple[str, list]:
+    """
+    将内部 OpenAI 格式消息转换为 responses API 输入格式
+    system 消息拆出为 instructions；工具调用和工具结果转为顶层 input item
+    """
+    instructions = messages[0]["content"]
+    input_messages = []
+    for msg in messages[1:]:
+        if msg["role"] == "assistant" and msg.get("tool_calls"):
+            if msg.get("content"):
+                input_messages.append({"role": "assistant", "content": msg["content"]})
+            input_messages.extend(
+                {
+                    "type": "function_call",
+                    "call_id": tc["id"],
+                    "name": tc["function"]["name"],
+                    "arguments": tc["function"]["arguments"],
+                }
+                for tc in msg["tool_calls"]
+            )
+        elif msg["role"] == "tool":
+            input_messages.append({
+                "type": "function_call_output",
+                "call_id": msg["tool_call_id"],
+                "output": msg["content"],
+            })
+        elif msg["role"] == "assistant":
+            input_messages.append({"role": "assistant", "content": msg.get("content") or ""})
+        elif isinstance(msg["content"], list):
+            content = []
+            for block in msg["content"]:
+                if block["type"] == "text":
+                    content.append({"type": "input_text", "text": block["text"]})
+                elif block["type"] == "image_url":
+                    content.append({"type": "input_image", "image_url": block["image_url"]["url"]})
+            input_messages.append({"role": msg["role"], "content": content})
+        else:
+            input_messages.append({"role": msg["role"], "content": msg["content"]})
+    return instructions, input_messages
+
+def prepare_anthropic_messages(messages: list) -> tuple[list, list]:
+    """
+    将内部 OpenAI 格式消息转换为 anthropic messages 输入格式
+    system 消息拆出为顶层参数；image_url 转为 base64 image block；assistant 的 tool_calls 转为 tool_use block；
+    tool 消息合并为 user 消息的 tool_result block
+    """
+    system = [{"type": "text", "text": messages[0]["content"]}]
+    anthropic_messages = []
+    for msg in messages[1:]:
+        if msg["role"] == "tool":
+            if (anthropic_messages and anthropic_messages[-1]["role"] == "user"
+                    and anthropic_messages[-1]["content"][0].get("type") == "tool_result"):
+                anthropic_messages[-1]["content"].append({
+                    "type": "tool_result",
+                    "tool_use_id": msg["tool_call_id"],
+                    "content": msg["content"],
+                })
+            else:
+                anthropic_messages.append({
+                    "role": "user",
+                    "content": [{"type": "tool_result", "tool_use_id": msg["tool_call_id"], "content": msg["content"]}],
+                })
+            continue
+        if msg["role"] == "assistant" and msg.get("tool_calls"):
+            content = []
+            if msg.get("content"):
+                content.append({"type": "text", "text": msg["content"]})
+            for tc in msg["tool_calls"]:
+                input_json = {}
+                try: # 防止json错误
+                    input_json = json.loads(tc["function"]["arguments"])
+                except json.JSONDecodeError:
+                    pass
+                content.append({
+                    "type": "tool_use",
+                    "id": tc["id"],
+                    "name": tc["function"]["name"],
+                    "input": input_json,
+                })
+        elif isinstance(msg["content"], list):
+            content = []
+            for block in msg["content"]:
+                if block["type"] == "text":
+                    content.append(block)
+                elif block["type"] == "image_url":
+                    url = block["image_url"]["url"]
+                    meta, b64 = url.split(",", 1)
+                    media_type = meta[len("data:"):].split(";", 1)[0]
+                    content.append({
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": media_type, "data": b64},
+                    })
+        else:
+            content = msg["content"]
+        anthropic_messages.append({"role": msg["role"], "content": content})
+    return system, anthropic_messages
+
+def thinking_params(model_config: dict, thinking: bool, api_type: str = "chat-completions") -> dict:
+    """按协议生成思考模式参数。api_type 缺省为 chat-completions（主要格式）"""
+    thinking_config = model_config.get("thinking")
+    if not thinking_config:
+        return {}
+    if api_type == "anthropic":
+        if not thinking and thinking_config.get("can_nonthink", False):
+            return {"thinking": {"type": "disabled"}}
+        params: dict = {}
+        if thinking_config.get("request_summary", False):
+            params["thinking"] = {"type": "adaptive", "display": "summarized"}
+        else:
+            params["thinking"] = {"type": thinking_config["on_param"]}
+        if "effort" in thinking_config:
+            params["output_config"] = {"effort": thinking_config["effort"]}
+        elif thinking_config.get("budget_tokens", False):
+            params["thinking"]["budget_tokens"] = thinking_config["budget_tokens"]
+        return params
+    if api_type == "responses":
+        reasoning = {}
+        if not thinking and thinking_config.get("can_nonthink", False): # 不思考
+            reasoning["effort"] = "none"
+        else:
+            reasoning["effort"] = thinking_config["effort"]
+        if thinking_config.get("request_summary", False): # 要求思考摘要
+            reasoning["summary"] = "auto"
+        return {"reasoning": reasoning}
+    if "extra_body" in thinking_config: # chat-completions 优先 extra_body
+        return {"extra_body": thinking_config["extra_body"]["true"] if thinking else thinking_config["extra_body"]["false"]}
+    if not thinking and thinking_config.get("can_nonthink", False): # chat-completions 不思考
+        return {"reasoning_effort": "none"}
+    return {"reasoning_effort": thinking_config["effort"]}
+
 class API:
     api = REMOTE_API_URL
     key = REMOTE_API_KEY
+    session = requests.Session()
 
     @staticmethod
     def search(query: str) -> str:
-        response = requests.get(f"{API.api}/search", headers={"key": API.key}, params={"q": query})
+        response = API.session.get(f"{API.api}/search", headers={"key": API.key}, params={"q": query})
         return response.text
     
     @staticmethod
     def read(url: str) -> str:
-        response = requests.get(f"{API.api}/read/{url}", headers={"key": API.key})
+        response = API.session.get(f"{API.api}/read/{url}", headers={"key": API.key})
         return response.text
     
     @staticmethod
     def ocr(url: str) -> str:
-        response = requests.get(f"{API.api}/ocr", headers={"key": API.key}, params={"url": url})
+        response = API.session.get(f"{API.api}/ocr", headers={"key": API.key}, params={"url": url})
         return response.text
     
     @staticmethod
     def transcribe(url: str) -> str:
-        response = requests.get(f"{API.api}/voicerecognition", headers={"key": API.key}, params={"url": url})
+        response = API.session.get(f"{API.api}/voicerecognition", headers={"key": API.key}, params={"url": url})
         return response.text
     
     @staticmethod
@@ -105,12 +256,12 @@ class API:
     
     @staticmethod
     def _bilibili_bv(bv: str) -> str:
-        response = requests.get(f"{API.api}/bilibilivideo", headers={"key": API.key}, params={"bv": bv})
+        response = API.session.get(f"{API.api}/bilibilivideo", headers={"key": API.key}, params={"bv": bv})
         return response.text
 
     @staticmethod
     def _bilibili_url(url: str) -> str:
-        response = requests.get(f"{API.api}/bilibilivideo", headers={"key": API.key}, params={"url": url})
+        response = API.session.get(f"{API.api}/bilibilivideo", headers={"key": API.key}, params={"url": url})
         return response.text
     
     @staticmethod
@@ -124,27 +275,27 @@ class API:
     
     @staticmethod
     def _ncm_id(id: str) -> str:
-        response = requests.get(f"{API.api}/ncmlyric", headers={"key": API.key}, params={"id": id})
+        response = API.session.get(f"{API.api}/ncmlyric", headers={"key": API.key}, params={"id": id})
         return response.text
 
     @staticmethod
     def _ncm_url(url: str) -> str:
-        response = requests.get(f"{API.api}/ncmlyric", headers={"key": API.key}, params={"url": url})
+        response = API.session.get(f"{API.api}/ncmlyric", headers={"key": API.key}, params={"url": url})
         return response.text
-
+    
     @staticmethod
     def verify_friend_request_token(qqid: int, token: str) -> bool:
-        response = requests.get(f"{API.api}/invitecheck", headers={"key": API.key}, params={"qqid": qqid, "token": token})
+        response = API.session.get(f"{API.api}/invitecheck", headers={"key": API.key}, params={"qqid": qqid, "token": token})
         return response.json()
 
     @staticmethod
     def check_webchat_password(uid: int) -> bool | str:
-        response = requests.get(f"{API.api}/checkpwd", headers={"key": API.key}, params={"uid": uid})
+        response = API.session.get(f"{API.api}/checkpwd", headers={"key": API.key}, params={"uid": uid})
         return response.text if response.status_code == 200 else False
     
     @staticmethod
     def reset_webchat_password(uid: int) -> str:
-        response = requests.get(f"{API.api}/resetpwd", headers={"key": API.key}, params={"uid": uid})
+        response = API.session.get(f"{API.api}/resetpwd", headers={"key": API.key}, params={"uid": uid})
         return response.text
 
 class NapcatAPI:
@@ -176,6 +327,15 @@ class Utils:
         if url not in Utils.oclients:
             Utils.oclients[url] = OpenAI(api_key=MODELS[model]["api_key"], base_url=MODELS[model]["url"])
         return Utils.oclients[url]
+
+    aclients = {}
+
+    @staticmethod
+    def aclient(model) -> Anthropic:
+        url = MODELS[model]["url"]
+        if url not in Utils.aclients:
+            Utils.aclients[url] = Anthropic(api_key=MODELS[model]["api_key"], base_url=MODELS[model]["url"])
+        return Utils.aclients[url]
     
     @staticmethod
     def url_to_b64(url: str, compress: int = 80, max_width: int = 1024, max_height: int = 1024) -> str:
@@ -232,38 +392,75 @@ class Utils:
 class Bigmodel:
     @staticmethod
     def ask_ai(prompt, content, model, thinking=False):
-        client = Utils.oclient(model)
+        api_type = MODELS[model].get("api_type", "chat-completions")
         if prompt:
             messages = [{"role": "system", "content": prompt}, {"role": "user", "content": content}]
         else:
             messages = [{"role": "user", "content": content}]
+        if api_type == "anthropic":
+            system, anthropic_messages = prepare_anthropic_messages(messages)
+            params = {
+                "model": model,
+                "max_tokens": MODELS[model]["max_tokens"],
+                "messages": anthropic_messages,
+                "system": system if prompt else [],  # type: ignore
+            }
+            params.update(thinking_params(MODELS[model], thinking, api_type))
+            response = Utils.aclient(model).messages.create(**params)
+            return "\n".join(block.text for block in response.content if isinstance(block, TextBlock))
+        if api_type == "responses":
+            instructions, input_messages = prepare_responses_messages(messages)
+            params = {
+                "model": model,
+                "instructions": instructions if prompt else "",
+                "input": input_messages,
+            }
+            params.update(thinking_params(MODELS[model], thinking, api_type))
+            response = Utils.oclient(model).responses.create(**params)
+            return response.output_text
+        client = Utils.oclient(model)
         params = {
             "model": model,
             "messages": messages,
             "stream": False
         }
-        if "default_thinking" in MODELS[model]:
-            if thinking:
-                params["extra_body"] = MODELS[model]["thinking-extra-body"]['true']
-            else:
-                params["extra_body"] = MODELS[model]["thinking-extra-body"]['false']
+        params.update(thinking_params(MODELS[model], thinking, api_type))
         response = client.chat.completions.create(**params)
         return response.choices[0].message.content
     
     @staticmethod
     def ask_ai_json(prompt, content, model, thinking=False):
+        api_type = MODELS[model].get("api_type", "chat-completions")
+        messages = [{"role": "system", "content": prompt}, {"role": "user", "content": content}]
+        if api_type == "anthropic":
+            system, anthropic_messages = prepare_anthropic_messages(messages)
+            params = {
+                "model": model,
+                "max_tokens": MODELS[model]["max_tokens"],
+                "messages": anthropic_messages,
+                "system": system,
+            }
+            params.update(thinking_params(MODELS[model], thinking, api_type))
+            response = Utils.aclient(model).messages.create(**params)
+            return "\n".join(block.text for block in response.content if isinstance(block, TextBlock))
+        if api_type == "responses":
+            instructions, input_messages = prepare_responses_messages(messages)
+            params = {
+                "model": model,
+                "instructions": instructions,
+                "input": input_messages,
+            }
+            params.update(thinking_params(MODELS[model], thinking, api_type))
+            response = Utils.oclient(model).responses.create(**params)
+            return response.output_text
         client = Utils.oclient(model)
         params = {
             "model": model,
-            "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": content}],
+            "messages": messages,
             "response_format": {"type": "json_object"},
             "stream": False
         }
-        if "default_thinking" in MODELS[model]:
-            if thinking:
-                params["extra_body"] = MODELS[model]["thinking-extra-body"]['true']
-            else:
-                params["extra_body"] = MODELS[model]["thinking-extra-body"]['false']
+        params.update(thinking_params(MODELS[model], thinking, api_type))
         response = client.chat.completions.create(**params)
         return response.choices[0].message.content
 
