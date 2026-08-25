@@ -1,6 +1,6 @@
 IDLE_REPLY_TIME: 0 # 空闲自动回复时间，单位秒。关闭设为0
 MAX_HISTORY: 100 # 最大历史消息数量，超过此数量的消息将被删除
-EXTENDED_MAX_HISTORY: 200 # 最大历史消息数量，消息数量超过此将被强制删除到MAX_HISTORY
+EXTENDED_MAX_HISTORY: 500 # 最大历史消息数量，消息数量超过此将被强制删除到MAX_HISTORY
 MODEL: deepseek-v4-flash # 默认模型
 NAME: 炉管大师
 PROMPT: |-

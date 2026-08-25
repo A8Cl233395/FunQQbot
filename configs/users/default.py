@@ -77,10 +77,10 @@ def hook_on_message_receive(self: Handle_private_message, data):
             self.send_message(f"指令处理出现错误")
     else: # 聊天
         time_interval = time.time() - self.last_message_time
-        if time_interval > 3500:
+        if time_interval > 1700:
             self.chat_instance.clear() # 超过1小时，清除聊天记录
-        elif time_interval > 1700:
-            self.chat_instance.crop(force=True) # 超过30分钟，强制裁剪到五条（约两轮）
+        # elif time_interval > 1700:
+        #     self.chat_instance.crop(force=True) # 超过30分钟，强制裁剪到五条（约两轮）
         else:
             self.chat_instance.crop()
         self.last_message_time = time.time()
@@ -88,7 +88,7 @@ def hook_on_message_receive(self: Handle_private_message, data):
 
 def hook_on_input(self: Handle_private_message): # 不保证能触发，有人关闭了这个功能
     # message_send # 要发送的消息 list
-    if time.time() - self.last_message_time > 3500:
+    if time.time() - self.last_message_time > 1700:
         self.last_message_time = time.time()
         self.chat_instance.clear()
         self.send_message("聊聊新话题~")

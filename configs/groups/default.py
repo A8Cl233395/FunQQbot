@@ -131,7 +131,7 @@ def ai_reply(self):
     # 拼接所有消息
     combined_text = "\n".join(self.stored_messages)
     # 调用大模型
-    result = Bigmodel.ask_ai(self.prompt, combined_text, model=self.model)
+    result = Bigmodel.ask_ai(self.prompt, combined_text, model=self.model, thinking=True)
     splited = []
     for line in result.splitlines():
         if line.startswith(f"{self.name}："):
