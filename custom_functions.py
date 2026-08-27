@@ -13,7 +13,6 @@ from anthropic.types import (
 )
 from PIL import Image
 from io import BytesIO
-import re
 from dataclasses import dataclass
 from base_settings import *
 import json
@@ -226,7 +225,7 @@ def thinking_params(model_config: dict, thinking: bool, api_type: str = "chat-co
 class API:
     uri = REMOTE_API_URL
     key = REMOTE_API_KEY
-    session = httpx.AsyncClient()
+    session = httpx.AsyncClient(timeout=600)
 
     @classmethod
     async def search(cls, query: str) -> str:
@@ -234,56 +233,13 @@ class API:
         return response.text
     
     @classmethod
-    async def read(cls, url: str) -> str:
-        response = await cls.session.get(f"{cls.uri}/read/{url}", headers={"key": cls.key})
+    async def custom_reader(cls, url: str) -> str:
+        response = await cls.session.get(f"{cls.uri}/customreader/{url}", headers={"key": cls.key})
         return response.text
     
     @classmethod
     async def ocr(cls, url: str) -> str:
         response = await cls.session.get(f"{cls.uri}/ocr", headers={"key": cls.key}, params={"url": url})
-        return response.text
-    
-    # @classmethod
-    # async def transcribe(cls, url: str) -> str:
-    #     response = await cls.session.get(f"{cls.api}/voicerecognition", headers={"key": cls.key}, params={"url": url})
-    #     return response.text
-    
-    @classmethod
-    async def bilibili(cls, bv=None, url=None) -> str:
-        if bv is not None:
-            return await cls._bilibili_bv(bv)
-        elif url is not None:
-            return await cls._bilibili_url(url)
-        else:
-            return "请输入 bv 或 url 参数！"
-    
-    @classmethod
-    async def _bilibili_bv(cls, bv: str) -> str:
-        response = await cls.session.get(f"{cls.uri}/bilibilivideo", headers={"key": cls.key}, params={"bv": bv})
-        return response.text
-
-    @classmethod
-    async def _bilibili_url(cls, url: str) -> str:
-        response = await cls.session.get(f"{cls.uri}/bilibilivideo", headers={"key": cls.key}, params={"url": url})
-        return response.text
-    
-    @classmethod
-    async def ncm(cls, id=None, url=None) -> str:
-        if id is not None:
-            return await cls._ncm_id(id)
-        elif url is not None:
-            return await cls._ncm_url(url)
-        else:
-            return "请输入 id 或 url 参数！"
-    
-    @classmethod
-    async def _ncm_id(cls, id: str) -> str:
-        response = await cls.session.get(f"{cls.uri}/ncmlyric", headers={"key": cls.key}, params={"id": id})
-        return response.text
-
-    @classmethod
-    async def _ncm_url(cls, url: str) -> str:
-        response = await cls.session.get(f"{cls.uri}/ncmlyric", headers={"key": cls.key}, params={"url": url})
         return response.text
     
     @classmethod
@@ -304,7 +260,7 @@ class API:
 class NapcatAPI:
     username_cache = LRUCache(128)
     uri = "http://127.0.0.1:3001"
-    session = httpx.AsyncClient()
+    session = httpx.AsyncClient(timeout=600)
 
     @classmethod
     async def get_username(cls, id):
@@ -339,7 +295,7 @@ class NapcatAPI:
 class Utils:
     oclients = {}
     aclients = {}
-    http_client = httpx.AsyncClient()
+    http_client = httpx.AsyncClient(timeout=600)
 
     @classmethod
     def oclient(cls, model) -> AsyncOpenAI:
@@ -388,24 +344,6 @@ class Utils:
         except Exception as e:
             logger.warning("图片处理失败，返回原图: %s", e)
             return base64.b64encode(response.content).decode("utf-8")
-    
-    @staticmethod
-    async def customize_reader(url):
-        domain_regex = r"^(?:https?:)?(?:\/\/)?([^\/\?:]+)(?:[\/\?:].*)?$"
-        domain = re.search(domain_regex, url).group(1)
-        try:
-            match domain:
-                case "music.163.com":
-                    song_id = re.search(r"id=(\d+)", url).group(1)
-                    return await API.ncm(id=song_id)
-                case "163cn.tv":
-                    return await API.ncm(url=url)
-                case "b23.tv" | "bilibili.com" | "www.bilibili.com":
-                    return await API.bilibili(url=url)
-                case _:
-                    return await API.read(url=url)
-        except:
-            return await API.read(url=url)
 
 class Bigmodel:
     @staticmethod

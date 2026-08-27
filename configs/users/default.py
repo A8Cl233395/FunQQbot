@@ -73,7 +73,7 @@ async def hook_on_message_receive(self: Handle_private_message, data):
         except json.JSONDecodeError:
             await self.send_message("指令内容包含提示词注入")
         except Exception as e:
-            logger.error(f"指令处理出现错误: {e}")
+            logger.exception(f"指令处理出现错误: {e}")
             await self.send_message(f"指令处理出现错误")
     else: # 聊天
         time_interval = time.time() - self.last_message_time
@@ -124,7 +124,7 @@ async def chat(self: Handle_private_message, data):
                 self.chat_instance.add({"type": "text", "text": text})
             case "reply":
                 reply_data = await NapcatAPI.get_message(message["data"]["id"])
-                text = await messages_to_text(reply_data)[1]
+                text = (await messages_to_text(reply_data))[1]
                 self.chat_instance.add({"type": "text", "text": "\n".join([f"> {i}" for i in text.splitlines()])})
             case "face":
                 self.chat_instance.add({"type": "text", "text": "<动画表情>"})
@@ -132,7 +132,7 @@ async def chat(self: Handle_private_message, data):
                 foward_messages = message["data"]["content"]
                 text = ""
                 for i in foward_messages:
-                    text += await messages_to_text(i)[0] + "\n"
+                    text += (await messages_to_text(i))[0] + "\n"
                 self.chat_instance.add({"type": "text", "text": f" ```合并转发内容\n{text}``` "})
             case _:
                 self.chat_instance.add({"type": "text", "text": "<未知>"})
@@ -180,7 +180,7 @@ async def messages_to_text(data) -> tuple[str, str]:
             case "reply":
                 reply_data = await NapcatAPI.get_message(message["data"]["id"])
                 if reply_data:
-                    reply = await messages_to_text(reply_data)[1]
+                    reply = (await messages_to_text(reply_data))[1]
                 else:
                     reply = "消息不存在"
                 marked_reply = "\n".join([f"> {i}" for i in reply.splitlines()])
@@ -191,7 +191,7 @@ async def messages_to_text(data) -> tuple[str, str]:
                 foward_messages = message["data"]["content"]
                 text = ""
                 for i in foward_messages:
-                    text += await messages_to_text(i)[0] + "\n"
+                    text += (await messages_to_text(i))[0] + "\n"
                 output_text += f"\n```合并转发内容\n{text}``` "
             case "markdown":
                 output_text += f"\n```markdown\n{message['data']['content']}\n```"

@@ -104,7 +104,7 @@ async def messages_to_text(data, self_name) -> tuple[str, str, bool]:
             case "reply":
                 reply_data = await NapcatAPI.get_message(message["data"]["id"])
                 if reply_data:
-                    reply = await messages_to_text(reply_data, self_name=self_name)[0]
+                    reply = (await messages_to_text(reply_data, self_name=self_name))[0]
                 else:
                     reply = "<消息不存在>"
                 marked_reply = "\n".join([f"> {i}" for i in reply.splitlines()])
@@ -115,7 +115,7 @@ async def messages_to_text(data, self_name) -> tuple[str, str, bool]:
                 foward_messages = message["data"]["content"]
                 text = ""
                 for i in foward_messages:
-                    text += await messages_to_text(i, self_name=self_name)[0] + "\n"
+                    text += (await messages_to_text(i, self_name=self_name))[0] + "\n"
                 output_text += f"\n```合并转发内容\n{text}``` "
             case "markdown":
                 output_text += f"\n```markdown\n{message['data']['content']}\n```"

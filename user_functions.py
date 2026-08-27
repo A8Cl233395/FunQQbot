@@ -359,7 +359,7 @@ class UserChat:
         except Exception as e:
             id = os.urandom(4).hex()
             yield f"---Error ! Trace id: {id}---"
-            logger.error(f"Error in {id}: {str(e)}")
+            logger.exception(f"Error in {id}: {str(e)}")
             yield f"正在尝试回滚消息..."
             messages = self.messages.copy()
             messages.reverse()
@@ -375,7 +375,7 @@ class UserChat:
             arguments_json = json.loads(tool_call["function"]["arguments"])
             match tool_call["function"]["name"]:
                 case "readURL":
-                    content = await Utils.customize_reader(arguments_json["url"])
+                    content = await API.custom_reader(arguments_json["url"])
                 case "searchWeb":
                     content = await API.search(query=arguments_json["query"])
                 case "manageMemory":
@@ -496,7 +496,7 @@ class Sync:
                                 elif data["operate"] == "remove":
                                     user.user_data.memory.remove(data["data"])
                     except Exception as e:
-                        logger.error(f"Sync error: {e}")
+                        logger.exception(f"Sync error: {e}")
             except asyncio.TimeoutError:
                 logger.warning("与同步服务器的连接超时，尝试重新连接...")
                 cls.websocket = None

@@ -61,7 +61,7 @@ class Handle_group_message:
             else:
                 return module
         except Exception as e:
-            logger.error("[%s] 自定义脚本加载失败: %s", self.group_id, e)
+            logger.exception("[%s] 自定义脚本加载失败: %s", self.group_id, e)
 
     async def on_receive_message(self, messages):
         logger.debug("群 %s 收到消息", self.group_id)
@@ -128,7 +128,7 @@ class Handle_private_message:
             else:
                 return module
         except Exception as e:
-            logger.error("[%s] 自定义脚本加载失败: %s", self.user_id, e)
+            logger.exception("[%s] 自定义脚本加载失败: %s", self.user_id, e)
     
     async def on_receive_message(self, messages):
         logger.debug("用户 %s 发送私聊消息", self.user_id)
@@ -193,7 +193,7 @@ users: dict[int, Handle_private_message] = {}
 user_last_input_time: dict[int, float] = {}
 global_queue = asyncio.Queue()
 lock = asyncio.Lock()
-websocket_connect = None
+websocket_connect: websockets.ServerConnection | None = None
 
 async def init_user(user_id: int):
     logger.debug("Init user: %s", user_id)

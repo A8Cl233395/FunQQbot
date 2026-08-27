@@ -43,7 +43,7 @@ async def _verify_remote_api():
                 logger.critical("远程API服务错误！")
                 exit(1)
             service_status = response.json()
-            if "version" not in service_status or service_status["version"] != "6":
+            if "version" not in service_status or service_status["version"] != "7":
                 logger.critical("远程API服务版本不匹配！")
                 exit(1)
             if ENABLE_OCR and not service_status["ocr"]:
