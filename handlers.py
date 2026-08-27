@@ -1,7 +1,6 @@
 import importlib
 import importlib.util
 from types import ModuleType
-import threading
 import time
 from datetime import datetime
 import asyncio
@@ -34,10 +33,13 @@ class Handle_group_message:
                 group_config = yaml.safe_load(f)
             if group_config:
                 config.update(group_config)
+        self._config = config
         self.custom_module = self.load_custom_script()
+
+    async def initialize_custom_module(self):
         if self.custom_module:
-            self.custom_module.hook_init(self, config)
-        del config
+            await self.custom_module.hook_init(self, self._config)
+        del self._config
 
     def load_custom_script(self) -> ModuleType | None:
         """动态加载对应的群组脚本"""
@@ -61,17 +63,17 @@ class Handle_group_message:
         except Exception as e:
             logger.error("[%s] 自定义脚本加载失败: %s", self.group_id, e)
 
-    def on_receive_message(self, messages):
+    async def on_receive_message(self, messages):
         logger.debug("群 %s 收到消息", self.group_id)
         if self.custom_module:
-            self.custom_module.hook_on_message_receive(self, messages)
+            await self.custom_module.hook_on_message_receive(self, messages)
         logger.debug("Done Handling Group %s", self.group_id)
     
-    def on_quit(self):
+    async def on_quit(self):
         if self.custom_module:
-            self.custom_module.hook_on_quit(self)
+            await self.custom_module.hook_on_quit(self)
 
-    def send_message(self, message):
+    async def send_message(self, message):
         """发送群消息"""
         if f"{message}" == "":
             pass
@@ -83,7 +85,7 @@ class Handle_group_message:
                     "message": message
                 },
             }, ensure_ascii=False)
-            push_to_websocket(data)
+            await push_to_websocket(data)
 
 class Handle_private_message:
     def __init__(self, user_id):
@@ -96,9 +98,13 @@ class Handle_private_message:
                 user_config = yaml.safe_load(f)
             if user_config:
                 config.update(user_config)
+        self._config = config
         self.custom_module = self.load_custom_script()
+
+    async def initialize_custom_module(self):
         if self.custom_module:
-            self.custom_module.hook_init(self, config)
+            await self.custom_module.hook_init(self, self._config)
+        del self._config
     
     def load_custom_script(self) -> ModuleType | None:
         """动态加载对应的群组脚本"""
@@ -124,21 +130,21 @@ class Handle_private_message:
         except Exception as e:
             logger.error("[%s] 自定义脚本加载失败: %s", self.user_id, e)
     
-    def on_receive_message(self, messages):
+    async def on_receive_message(self, messages):
         logger.debug("用户 %s 发送私聊消息", self.user_id)
         if self.custom_module:
-            self.custom_module.hook_on_message_receive(self, messages)
+            await self.custom_module.hook_on_message_receive(self, messages)
         logger.debug("Done Handling User %s", self.user_id)
     
-    def on_input(self):
+    async def on_input(self):
         if self.custom_module:
-            self.custom_module.hook_on_input(self)
+            await self.custom_module.hook_on_input(self)
     
-    def on_quit(self):
+    async def on_quit(self):
         if self.custom_module:
-            self.custom_module.hook_on_quit(self)
+            await self.custom_module.hook_on_quit(self)
 
-    def send_message(self, message):
+    async def send_message(self, message):
         # 别删!!!
         if f"{message}" == "":
             pass
@@ -150,11 +156,11 @@ class Handle_private_message:
                     "message": f"{message}"
                 },
             }, ensure_ascii=False)
-            push_to_websocket(response_json)
+            await push_to_websocket(response_json)
 
 class Handle_friend_request:
     @staticmethod
-    def handle_friend_request(data):
+    async def handle_friend_request(data):
         logger.info(f"处理好友请求: {data['user_id']}")
         flag = data["flag"]
         comment = data["comment"]
@@ -162,15 +168,15 @@ class Handle_friend_request:
         # 问题1:Enter Key\n回答:123123123\n
         token = comment.split("\n")[1][3:].strip() 
         if not token:
-            Handle_friend_request._send_result(flag, False)
+            await Handle_friend_request._send_result(flag, False)
             return
-        if not API.verify_friend_request_token(data["user_id"], token):
-            Handle_friend_request._send_result(flag, False)
+        if not await API.verify_friend_request_token(data["user_id"], token):
+            await Handle_friend_request._send_result(flag, False)
             return
-        Handle_friend_request._send_result(flag, True)
+        await Handle_friend_request._send_result(flag, True)
     
     @staticmethod
-    def _send_result(flag: str, is_passed: bool):
+    async def _send_result(flag: str, is_passed: bool):
         response_json = json.dumps({
             "action": "set_friend_add_request",
             "params": {
@@ -178,31 +184,27 @@ class Handle_friend_request:
                 "approve": is_passed,
             },
         }, ensure_ascii=False)
-        push_to_websocket(response_json)
+        await push_to_websocket(response_json)
 
-user_locks: dict[int, threading.Lock] = {}
-group_locks: dict[int, threading.Lock] = {}
+user_locks: dict[int, asyncio.Lock] = {}
+group_locks: dict[int, asyncio.Lock] = {}
 groups: dict[int, Handle_group_message] = {}
 users: dict[int, Handle_private_message] = {}
 user_last_input_time: dict[int, float] = {}
 global_queue = asyncio.Queue()
 lock = asyncio.Lock()
 websocket_connect = None
-loop = None
 
-def init_user(user_id: int):
+async def init_user(user_id: int):
     logger.debug("Init user: %s", user_id)
     users[user_id] = Handle_private_message(user_id)
-    user_locks[user_id] = threading.Lock()
+    await users[user_id].initialize_custom_module()
+    user_locks[user_id] = asyncio.Lock()
     user_last_input_time[user_id] = time.time() # 初始化上次输入时间
 
-def set_event_loop(event_loop):
-    global loop
-    loop = event_loop
-
-def push_to_websocket(message):
+async def push_to_websocket(message):
     if websocket_connect:
-        asyncio.run_coroutine_threadsafe(_push_with_delay(message), loop)
+        await _push_with_delay(message)
         logger.debug(f"Websocket sent message: {message}")
 
 async def _push_with_delay(message, delay=0.05):
@@ -227,43 +229,44 @@ async def handler(websocket):
                         logger.info("与Napcat连接成功！")
             elif data["post_type"] == "message":
                 if data["message_type"] == "group":
-                    threading.Thread(target=_group_message_receive_handler, args=(data, data["group_id"])).start()
+                    asyncio.create_task(_group_message_receive_handler(data, data["group_id"]))
                 elif data["message_type"] == "private":
                     user_id = data["user_id"]
-                    threading.Thread(target=_private_message_receive_handler, args=(data, user_id)).start()
+                    asyncio.create_task(_private_message_receive_handler(data, user_id))
             elif data["post_type"] == "notice":
                 if data["notice_type"] == "notify":
                     if data["sub_type"] == "input_status":
                         if data["status_text"] != "":
                             user_id = data["user_id"]
-                            if user_id not in users:
-                                continue # 忽略不在用户列表中的用户
-                            if time.time() - user_last_input_time[user_id] < 5:
-                                continue # 上次输入时间小于5秒，忽略
-                            user_last_input_time[user_id] = time.time() # 更新上次输入时间
-                            threading.Thread(target=_private_message_on_input_handler, args=(user_id,)).start()
+                            asyncio.create_task(_private_message_on_input_handler(user_id))
             elif data["post_type"] == "request":
                 if data["request_type"] == "friend":
                     if ALLOW_ADD_BOT_WITH_TOKEN_VERIFY:
-                        threading.Thread(target=Handle_friend_request.handle_friend_request, args=(data,)).start()
+                        asyncio.create_task(Handle_friend_request.handle_friend_request(data))
     except websockets.exceptions.ConnectionClosedError:
         logger.info("与Napcat连接已关闭")
     finally:
         websocket_connect = None
 
-def _group_message_receive_handler(messages, group_id):
+async def _group_message_receive_handler(messages, group_id):
     if group_id not in groups:
         groups[group_id] = Handle_group_message(group_id)
-        group_locks[group_id] = threading.Lock()
-    with group_locks[group_id]:
-        groups[group_id].on_receive_message(messages)
+        await groups[group_id].initialize_custom_module()
+        group_locks[group_id] = asyncio.Lock()
+    async with group_locks[group_id]:
+        await groups[group_id].on_receive_message(messages)
 
-def _private_message_receive_handler(messages, user_id):
+async def _private_message_receive_handler(messages, user_id):
     if user_id not in users:
-        init_user(user_id)
-    with user_locks[user_id]:
-        users[user_id].on_receive_message(messages)
+        await init_user(user_id)
+    async with user_locks[user_id]:
+        await users[user_id].on_receive_message(messages)
 
-def _private_message_on_input_handler(user_id):
-    with user_locks[user_id]:
-        users[user_id].on_input()
+async def _private_message_on_input_handler(user_id):
+    if user_id not in users:
+        return # 忽略不在用户列表中的用户
+    if time.time() - user_last_input_time[user_id] < 5:
+        return # 上次输入时间小于5秒，忽略
+    user_last_input_time[user_id] = time.time() # 更新上次输入时间
+    async with user_locks[user_id]:
+        await users[user_id].on_input()

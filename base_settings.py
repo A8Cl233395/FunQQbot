@@ -1,6 +1,7 @@
 import yaml
 import os
-import requests
+import asyncio
+import httpx
 import logging
 
 # 配置日志
@@ -31,40 +32,41 @@ ALLOW_ADD_BOT_WITH_TOKEN_VERIFY: bool = base_config["ALLOW_ADD_BOT_WITH_TOKEN_VE
 ALLOW_WEBCHAT: bool = base_config["ALLOW_WEBCHAT"]
 del base_config
 
-try:
-    response = requests.get(f"{REMOTE_API_URL}/status", headers={"key": REMOTE_API_KEY}, timeout=5)
-    if response.status_code == 403:
-        logger.critical("远程API密钥错误！")
-        exit(1)
-    elif response.status_code == 500:
-        logger.critical("远程API服务错误！")
-        exit(1)
-    service_status = response.json()
-    if "version" not in service_status or service_status["version"] != "6":
-        logger.critical("远程API服务版本不匹配！")
-        exit(1)
-    if ENABLE_OCR and not service_status["ocr"]:
-        logger.critical("远程API OCR 功能未开启！")
-        exit(1)
-    if REMOTE_WEBSOCKET_URI and not service_status["link"]:
-        logger.critical("远程API 同步 功能未开启！")
-        exit(1)
-    if ALLOW_ADD_BOT_WITH_TOKEN_VERIFY and not service_status["invite"]:
-        logger.critical("远程API 邀请验证 功能未开启！")
-        exit(1)
-    if ALLOW_WEBCHAT and not service_status["webchat"]:
-        logger.critical("远程API 网页聊天 功能未开启！")
-        exit(1)
-except requests.exceptions.RequestException:
-    logger.critical("无法连接到远程API服务！")
-    exit(1)
-except requests.exceptions.Timeout:
-    logger.critical("无法连接到远程API服务！")
-    exit(1)
-finally:
-    try:
-        del response, service_status
-    except:
-        pass
+async def _verify_remote_api():
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(f"{REMOTE_API_URL}/status", headers={"key": REMOTE_API_KEY}, timeout=5)
+            if response.status_code == 403:
+                logger.critical("远程API密钥错误！")
+                exit(1)
+            elif response.status_code == 500:
+                logger.critical("远程API服务错误！")
+                exit(1)
+            service_status = response.json()
+            if "version" not in service_status or service_status["version"] != "6":
+                logger.critical("远程API服务版本不匹配！")
+                exit(1)
+            if ENABLE_OCR and not service_status["ocr"]:
+                logger.critical("远程API OCR 功能未开启！")
+                exit(1)
+            if REMOTE_WEBSOCKET_URI and not service_status["link"]:
+                logger.critical("远程API 同步 功能未开启！")
+                exit(1)
+            if ALLOW_ADD_BOT_WITH_TOKEN_VERIFY and not service_status["invite"]:
+                logger.critical("远程API 邀请验证 功能未开启！")
+                exit(1)
+            if ALLOW_WEBCHAT and not service_status["webchat"]:
+                logger.critical("远程API 网页聊天 功能未开启！")
+                exit(1)
+        except (httpx.RequestError, httpx.TimeoutException):
+            logger.critical("无法连接到远程API服务！")
+            exit(1)
+        finally:
+            try:
+                del response, service_status
+            except:
+                pass
+
+asyncio.run(_verify_remote_api())
 
 logger.info("配置加载完成！")

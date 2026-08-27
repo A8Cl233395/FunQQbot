@@ -1,6 +1,6 @@
 from handlers import *
 
-def hook_init(self: Handle_group_message, config: dict):
+async def hook_init(self: Handle_group_message, config: dict):
     # self.config # 当前群组配置 dict
     self.prompt = config['PROMPT']
     self.name = config["NAME"]
@@ -11,11 +11,11 @@ def hook_init(self: Handle_group_message, config: dict):
     self.max_history = config["MAX_HISTORY"]
     self.extended_max_history = config["EXTENDED_MAX_HISTORY"]
     if self.idle_reply_time:
-        self.idle_task = threading.Thread(target=check_idle, args=(self,), daemon=True).start()
+        self.idle_task = asyncio.create_task(check_idle(self))
     self.bot_sent = False
     self.stored_messages = []
 
-def hook_on_message_receive(self: Handle_group_message, messages):
+async def hook_on_message_receive(self: Handle_group_message, messages):
     time_to_last = time.time() - self.last_time
     if time_to_last > 3600: # 超过1小时清理
         self.delete = True
@@ -31,23 +31,23 @@ def hook_on_message_receive(self: Handle_group_message, messages):
         logger.info("群 %s 聊天记录超过 %s 条，清理到 %s 条", self.group_id, self.extended_max_history, self.max_history)
         self.delete = True
         self.stored_messages = self.stored_messages[-self.max_history:]
-    text, plain_text, is_mentioned = messages_to_text(messages, self.name)
+    text, plain_text, is_mentioned = await messages_to_text(messages, self.name)
     self.stored_messages.append(text)
     if is_mentioned:
         self.delete = False
-        result = ai_reply(self)
+        result = await ai_reply(self)
         for i in result:
             if type(i) == tuple:
                 self.stored_messages.append(f"{self.name}: {i[0]}")
-                self.send_message(i[1])
+                await self.send_message(i[1])
             else:
-                self.send_message(i)
+                await self.send_message(i)
 
-def hook_on_quit(self: Handle_group_message):
+async def hook_on_quit(self: Handle_group_message):
     # self.config # 当前群组配置 dict
     pass
 
-def messages_to_text(data, self_name) -> tuple[str, str, bool]:
+async def messages_to_text(data, self_name) -> tuple[str, str, bool]:
     output_text = ""
     is_mentioned = False
 
@@ -71,7 +71,7 @@ def messages_to_text(data, self_name) -> tuple[str, str, bool]:
             case "image":
                 if ENABLE_OCR:
                     if "sub_type" in message["data"] and message["data"]["sub_type"] == 0:
-                        image_text = API.ocr(message["data"]["url"].replace("https", "http"))
+                        image_text = await API.ocr(message["data"]["url"].replace("https", "http"))
                         output_text += f"\n```图片OCR结果\n{image_text}\n``` "
                     else:
                         output_text += f"\n<表情包>"
@@ -85,7 +85,7 @@ def messages_to_text(data, self_name) -> tuple[str, str, bool]:
             case "video":
                 output_text += "\n<视频>"
             case "record":
-                text = NapcatAPI.transcribe(message["data"]["id"])
+                text = await NapcatAPI.transcribe(message["data"]["id"])
                 output_text += f"\n{text}"
             case "at":
                 qq_id = message["data"]["qq"]
@@ -96,15 +96,15 @@ def messages_to_text(data, self_name) -> tuple[str, str, bool]:
                     is_mentioned = True
                     name = "全体成员"
                 else:
-                    name = NapcatAPI.get_username(qq_id)
+                    name = await NapcatAPI.get_username(qq_id)
                 if last_type == "text":
                     output_text += f"@{name}"
                 else:
                     output_text += f"\n@{name}"
             case "reply":
-                reply_data = NapcatAPI.get_message(message["data"]["id"])
+                reply_data = await NapcatAPI.get_message(message["data"]["id"])
                 if reply_data:
-                    reply = messages_to_text(reply_data, self_name=self_name)[0]
+                    reply = await messages_to_text(reply_data, self_name=self_name)[0]
                 else:
                     reply = "<消息不存在>"
                 marked_reply = "\n".join([f"> {i}" for i in reply.splitlines()])
@@ -115,7 +115,7 @@ def messages_to_text(data, self_name) -> tuple[str, str, bool]:
                 foward_messages = message["data"]["content"]
                 text = ""
                 for i in foward_messages:
-                    text += messages_to_text(i, self_name=self_name)[0] + "\n"
+                    text += await messages_to_text(i, self_name=self_name)[0] + "\n"
                 output_text += f"\n```合并转发内容\n{text}``` "
             case "markdown":
                 output_text += f"\n```markdown\n{message['data']['content']}\n```"
@@ -127,11 +127,11 @@ def messages_to_text(data, self_name) -> tuple[str, str, bool]:
     output_text = output_text.strip()
     return username + ": " + output_text, output_text, is_mentioned
 
-def ai_reply(self):
+async def ai_reply(self):
     # 拼接所有消息
     combined_text = "\n".join(self.stored_messages)
     # 调用大模型
-    result = Bigmodel.ask_ai(self.prompt, combined_text, model=self.model, thinking=True)
+    result = await Bigmodel.ask_ai(self.prompt, combined_text, model=self.model, thinking=True)
     splited = []
     for line in result.splitlines():
         if line.startswith(f"{self.name}："):
@@ -154,19 +154,19 @@ def ai_reply(self):
             pass
     return splited
 
-def check_idle(self: Handle_group_message):
+async def check_idle(self: Handle_group_message):
     """检查群是否长时间无人发消息"""
     sleep_time = max(self.idle_reply_time / 5, 10)
     while True:
-        time.sleep(sleep_time)
+        await asyncio.sleep(sleep_time)
         if time.time() - self.last_time > self.idle_reply_time and not self.bot_sent:
-            for i in ai_reply(self):
+            for i in await ai_reply(self):
                 if type(i) == tuple:
                     self.stored_messages.append(f"{self.name}: {i[0]}")
                     to_user = i[1]
                 else:
                     to_user = i
-                self.send_message(to_user)
+                await self.send_message(to_user)
             self.bot_sent = True
             self.delete = False
             self.last_time = time.time()  # 重置最后聊天时间

@@ -1,7 +1,7 @@
 import base64
 from collections import OrderedDict
-from openai import OpenAI
-from anthropic import Anthropic
+from openai import AsyncOpenAI
+from anthropic import AsyncAnthropic
 from anthropic.types import (
     ContentBlockDeltaEvent,
     ContentBlockStartEvent,
@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from base_settings import *
 import json
 import time
+import asyncio
+import httpx
 
 class LRUCache:
     def __init__(self, capacity=50, allow_reverse=False):
@@ -224,92 +226,92 @@ def thinking_params(model_config: dict, thinking: bool, api_type: str = "chat-co
 class API:
     uri = REMOTE_API_URL
     key = REMOTE_API_KEY
-    session = requests.Session()
+    session = httpx.AsyncClient()
 
     @classmethod
-    def search(cls, query: str) -> str:
-        response = cls.session.get(f"{cls.uri}/search", headers={"key": cls.key}, params={"q": query})
+    async def search(cls, query: str) -> str:
+        response = await cls.session.get(f"{cls.uri}/search", headers={"key": cls.key}, params={"q": query})
         return response.text
     
     @classmethod
-    def read(cls, url: str) -> str:
-        response = cls.session.get(f"{cls.uri}/read/{url}", headers={"key": cls.key})
+    async def read(cls, url: str) -> str:
+        response = await cls.session.get(f"{cls.uri}/read/{url}", headers={"key": cls.key})
         return response.text
     
     @classmethod
-    def ocr(cls, url: str) -> str:
-        response = cls.session.get(f"{cls.uri}/ocr", headers={"key": cls.key}, params={"url": url})
+    async def ocr(cls, url: str) -> str:
+        response = await cls.session.get(f"{cls.uri}/ocr", headers={"key": cls.key}, params={"url": url})
         return response.text
     
     # @classmethod
-    # def transcribe(cls, url: str) -> str:
-    #     response = cls.session.get(f"{cls.api}/voicerecognition", headers={"key": cls.key}, params={"url": url})
+    # async def transcribe(cls, url: str) -> str:
+    #     response = await cls.session.get(f"{cls.api}/voicerecognition", headers={"key": cls.key}, params={"url": url})
     #     return response.text
     
     @classmethod
-    def bilibili(cls, bv=None, url=None) -> str:
+    async def bilibili(cls, bv=None, url=None) -> str:
         if bv is not None:
-            return cls._bilibili_bv(bv)
+            return await cls._bilibili_bv(bv)
         elif url is not None:
-            return cls._bilibili_url(url)
+            return await cls._bilibili_url(url)
         else:
             return "请输入 bv 或 url 参数！"
     
     @classmethod
-    def _bilibili_bv(cls, bv: str) -> str:
-        response = cls.session.get(f"{cls.uri}/bilibilivideo", headers={"key": cls.key}, params={"bv": bv})
+    async def _bilibili_bv(cls, bv: str) -> str:
+        response = await cls.session.get(f"{cls.uri}/bilibilivideo", headers={"key": cls.key}, params={"bv": bv})
         return response.text
 
     @classmethod
-    def _bilibili_url(cls, url: str) -> str:
-        response = cls.session.get(f"{cls.uri}/bilibilivideo", headers={"key": cls.key}, params={"url": url})
+    async def _bilibili_url(cls, url: str) -> str:
+        response = await cls.session.get(f"{cls.uri}/bilibilivideo", headers={"key": cls.key}, params={"url": url})
         return response.text
     
     @classmethod
-    def ncm(cls, id=None, url=None) -> str:
+    async def ncm(cls, id=None, url=None) -> str:
         if id is not None:
-            return cls._ncm_id(id)
+            return await cls._ncm_id(id)
         elif url is not None:
-            return cls._ncm_url(url)
+            return await cls._ncm_url(url)
         else:
             return "请输入 id 或 url 参数！"
     
     @classmethod
-    def _ncm_id(cls, id: str) -> str:
-        response = cls.session.get(f"{cls.uri}/ncmlyric", headers={"key": cls.key}, params={"id": id})
+    async def _ncm_id(cls, id: str) -> str:
+        response = await cls.session.get(f"{cls.uri}/ncmlyric", headers={"key": cls.key}, params={"id": id})
         return response.text
 
     @classmethod
-    def _ncm_url(cls, url: str) -> str:
-        response = cls.session.get(f"{cls.uri}/ncmlyric", headers={"key": cls.key}, params={"url": url})
+    async def _ncm_url(cls, url: str) -> str:
+        response = await cls.session.get(f"{cls.uri}/ncmlyric", headers={"key": cls.key}, params={"url": url})
         return response.text
     
     @classmethod
-    def verify_friend_request_token(cls, qqid: int, token: str) -> bool:
-        response = cls.session.get(f"{cls.uri}/invitecheck", headers={"key": cls.key}, params={"qqid": qqid, "token": token})
+    async def verify_friend_request_token(cls, qqid: int, token: str) -> bool:
+        response = await cls.session.get(f"{cls.uri}/invitecheck", headers={"key": cls.key}, params={"qqid": qqid, "token": token})
         return response.json()
 
     @classmethod
-    def check_webchat_password(cls, uid: int) -> bool | str:
-        response = cls.session.get(f"{cls.uri}/checkpwd", headers={"key": cls.key}, params={"uid": uid})
+    async def check_webchat_password(cls, uid: int) -> bool | str:
+        response = await cls.session.get(f"{cls.uri}/checkpwd", headers={"key": cls.key}, params={"uid": uid})
         return response.text if response.status_code == 200 else False
     
     @classmethod
-    def reset_webchat_password(cls, uid: int) -> str:
-        response = cls.session.get(f"{cls.uri}/resetpwd", headers={"key": cls.key}, params={"uid": uid})
+    async def reset_webchat_password(cls, uid: int) -> str:
+        response = await cls.session.get(f"{cls.uri}/resetpwd", headers={"key": cls.key}, params={"uid": uid})
         return response.text
 
 class NapcatAPI:
     username_cache = LRUCache(128)
     uri = "http://127.0.0.1:3001"
-    session = requests.Session()
+    session = httpx.AsyncClient()
 
     @classmethod
-    def get_username(cls, id):
+    async def get_username(cls, id):
         if cls.username_cache.check(id):
             return cls.username_cache.get(id)
         try:
-            result = cls.session.post(f"{cls.uri}/get_stranger_info", json={"user_id": id}).json()
+            result = (await cls.session.post(f"{cls.uri}/get_stranger_info", json={"user_id": id})).json()
             data = result["data"]["nick"]
             cls.username_cache.put(id, data)
         except:
@@ -317,44 +319,45 @@ class NapcatAPI:
         return data
     
     @classmethod
-    def get_message(cls, id):
-        result = cls.session.post(cls.uri + "/get_msg", json={"message_id": id}).json()
+    async def get_message(cls, id):
+        result = (await cls.session.post(cls.uri + "/get_msg", json={"message_id": id})).json()
         return result["data"]
 
     @classmethod
-    def transcribe(cls, message_id: str | int) -> str:
+    async def transcribe(cls, message_id: str | int) -> str:
         start_time = time.time()
-        while time.time() - start_time < 10:
-            response = cls.session.post(f"{cls.uri}/fetch_ptt_text", json={"message_id": message_id}).json()
+        while time.time() - start_time < 10: # why twice? WHY?
+            response = (await cls.session.post(f"{cls.uri}/fetch_ptt_text", json={"message_id": message_id})).json()
             if response["status"] == "ok":
                 return response["data"]["text"]
             elif response["status"] == "failed":
                 if response["wording"] == "消息不存在":
                     return "<消息不存在>"
-                time.sleep(0.2)
+                await asyncio.sleep(0.2)
         return "<获取语音消息超时>"
 
 class Utils:
     oclients = {}
     aclients = {}
+    http_client = httpx.AsyncClient()
 
     @classmethod
-    def oclient(cls, model) -> OpenAI:
+    def oclient(cls, model) -> AsyncOpenAI:
         url = MODELS[model]["url"]
         if url not in cls.oclients:
-            cls.oclients[url] = OpenAI(api_key=MODELS[model]["api_key"], base_url=MODELS[model]["url"])
+            cls.oclients[url] = AsyncOpenAI(api_key=MODELS[model]["api_key"], base_url=MODELS[model]["url"])
         return cls.oclients[url]
 
     @classmethod
-    def aclient(cls, model) -> Anthropic:
+    def aclient(cls, model) -> AsyncAnthropic:
         url = MODELS[model]["url"]
         if url not in cls.aclients:
-            cls.aclients[url] = Anthropic(api_key=MODELS[model]["api_key"], base_url=MODELS[model]["url"])
+            cls.aclients[url] = AsyncAnthropic(api_key=MODELS[model]["api_key"], base_url=MODELS[model]["url"])
         return cls.aclients[url]
     
     @staticmethod
-    def url_to_b64(url: str, compress: int = 80, max_width: int = 1024, max_height: int = 1024) -> str:
-        response = requests.get(url)
+    async def url_to_b64(url: str, compress: int = 80, max_width: int = 1024, max_height: int = 1024) -> str:
+        response = await Utils.http_client.get(url)
         # 如果不压缩或compress为None，且不缩放，直接返回原图
         if (compress is None or not compress) and max_width is None and max_height is None:
             return base64.b64encode(response.content).decode("utf-8")
@@ -387,26 +390,26 @@ class Utils:
             return base64.b64encode(response.content).decode("utf-8")
     
     @staticmethod
-    def customize_reader(url):
+    async def customize_reader(url):
         domain_regex = r"^(?:https?:)?(?:\/\/)?([^\/\?:]+)(?:[\/\?:].*)?$"
         domain = re.search(domain_regex, url).group(1)
         try:
             match domain:
                 case "music.163.com":
                     song_id = re.search(r"id=(\d+)", url).group(1)
-                    return API.ncm(id=song_id)
+                    return await API.ncm(id=song_id)
                 case "163cn.tv":
-                    return API.ncm(url=url)
+                    return await API.ncm(url=url)
                 case "b23.tv" | "bilibili.com" | "www.bilibili.com":
-                    return API.bilibili(url=url)
+                    return await API.bilibili(url=url)
                 case _:
-                    return API.read(url=url)
+                    return await API.read(url=url)
         except:
-            return API.read(url=url)
+            return await API.read(url=url)
 
 class Bigmodel:
     @staticmethod
-    def ask_ai(prompt, content, model, thinking=False):
+    async def ask_ai(prompt, content, model, thinking=False):
         api_type = MODELS[model].get("api_type", "chat-completions")
         if prompt:
             messages = [{"role": "system", "content": prompt}, {"role": "user", "content": content}]
@@ -422,7 +425,7 @@ class Bigmodel:
                 "stream": False
             }
             params.update(thinking_params(MODELS[model], thinking, api_type))
-            response = Utils.aclient(model).messages.create(**params)
+            response = await Utils.aclient(model).messages.create(**params)
             return "\n".join(block.text for block in response.content if isinstance(block, TextBlock))
         if api_type == "responses":
             instructions, input_messages = prepare_responses_messages(messages)
@@ -433,7 +436,7 @@ class Bigmodel:
                 "stream": False
             }
             params.update(thinking_params(MODELS[model], thinking, api_type))
-            response = Utils.oclient(model).responses.create(**params)
+            response = await Utils.oclient(model).responses.create(**params)
             return response.output_text
         client = Utils.oclient(model)
         params = {
@@ -442,11 +445,11 @@ class Bigmodel:
             "stream": False
         }
         params.update(thinking_params(MODELS[model], thinking, api_type))
-        response = client.chat.completions.create(**params)
+        response = await client.chat.completions.create(**params)
         return response.choices[0].message.content
     
     @staticmethod
-    def ask_ai_json(prompt, content, model, thinking=False):
+    async def ask_ai_json(prompt, content, model, thinking=False):
         api_type = MODELS[model].get("api_type", "chat-completions")
         messages = [{"role": "system", "content": prompt}, {"role": "user", "content": content}]
         if api_type == "anthropic":
@@ -459,7 +462,7 @@ class Bigmodel:
                 "stream": False
             }
             params.update(thinking_params(MODELS[model], thinking, api_type))
-            response = Utils.aclient(model).messages.create(**params)
+            response = await Utils.aclient(model).messages.create(**params)
             return "\n".join(block.text for block in response.content if isinstance(block, TextBlock))
         if api_type == "responses":
             instructions, input_messages = prepare_responses_messages(messages)
@@ -470,7 +473,7 @@ class Bigmodel:
                 "stream": False
             }
             params.update(thinking_params(MODELS[model], thinking, api_type))
-            response = Utils.oclient(model).responses.create(**params)
+            response = await Utils.oclient(model).responses.create(**params)
             return response.output_text
         client = Utils.oclient(model)
         params = {
@@ -480,7 +483,7 @@ class Bigmodel:
             "stream": False
         }
         params.update(thinking_params(MODELS[model], thinking, api_type))
-        response = client.chat.completions.create(**params)
+        response = await client.chat.completions.create(**params)
         return response.choices[0].message.content
 
 @dataclass

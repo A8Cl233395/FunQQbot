@@ -1,6 +1,6 @@
 openai
 anthropic
 PyYAML
-Requests
+httpx
 websockets
 pillow

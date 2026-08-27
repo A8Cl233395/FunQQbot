@@ -1,6 +1,6 @@
 from user_functions import *
 
-def hook_init(self: "Handle_private_message", config: dict):
+async def hook_init(self: "Handle_private_message", config: dict):
     # self.config # 当前用户配置 dict
     self.command_check_prompt = config["COMMAND_CHECK_PROMPT"]
     if not os.path.exists(f"data/users/{self.user_id}.json"):
@@ -25,56 +25,56 @@ def hook_init(self: "Handle_private_message", config: dict):
     self.last_message_time = time.time()
     self.command_check_model = config["COMMAND_CHECK_MODEL"]
 
-def hook_on_message_receive(self: Handle_private_message, data):
+async def hook_on_message_receive(self: Handle_private_message, data):
     plain_text = process_first_message_text(data)
     if plain_text.startswith("/"):
-        commands = Bigmodel.ask_ai_json(self.command_check_prompt, plain_text[1:], model=self.command_check_model)
+        commands = await Bigmodel.ask_ai_json(self.command_check_prompt, plain_text[1:], model=self.command_check_model)
         try:
             commands: dict = json.loads(commands)
             if len(commands["commands"]) == 0:
-                self.send_message("可用指令：\n清除聊天记录\n开启/关闭函数调用\n开启/关闭思考模式\n网页聊天\n重置密码")
+                await self.send_message("可用指令：\n清除聊天记录\n开启/关闭函数调用\n开启/关闭思考模式\n网页聊天\n重置密码")
             else:
                 for command in commands["commands"]:
                     match command:
                         case "clear":
                             self.chat_instance.clear()
-                            self.send_message("聊天记录已清除")
+                            await self.send_message("聊天记录已清除")
                         case "enable_function":
                             self.user_data.enable_function = True
-                            self.send_message("已开启函数调用")
+                            await self.send_message("已开启函数调用")
                         case "disable_function":
                             self.user_data.enable_function = False
-                            self.send_message("已关闭函数调用")
+                            await self.send_message("已关闭函数调用")
                         case "enable_thinking":
                             self.user_data.thinking = True
-                            self.send_message("已开启思考模式")
+                            await self.send_message("已开启思考模式")
                         case "disable_thinking":
                             self.user_data.thinking = False
-                            self.send_message("已关闭思考模式")
+                            await self.send_message("已关闭思考模式")
                         case "webchat":
                             if ALLOW_WEBCHAT:
-                                result = API.check_webchat_password(self.user_id)
+                                result = await API.check_webchat_password(self.user_id)
                                 if result:
-                                    self.send_message("第一次使用网页聊天？这是你的初始密码：")
-                                    self.send_message(result)
-                                self.send_message(f"你可以前往 {REMOTE_API_URL}/webchat 进行网页版聊天")
-                                self.send_message("如果需要重置，请发送 \"重置密码\"")
+                                    await self.send_message("第一次使用网页聊天？这是你的初始密码：")
+                                    await self.send_message(result)
+                                await self.send_message(f"你可以前往 {REMOTE_API_URL}/webchat 进行网页版聊天")
+                                await self.send_message("如果需要重置，请发送 \"重置密码\"")
                         case "reset_password":
                             if ALLOW_WEBCHAT:
-                                result = API.reset_webchat_password(self.user_id)
+                                result = await API.reset_webchat_password(self.user_id)
                                 if result:
-                                    self.send_message("你的新密码是：")
-                                    self.send_message(result)
+                                    await self.send_message("你的新密码是：")
+                                    await self.send_message(result)
                             else:
-                                self.send_message("该功能未开启")
+                                await self.send_message("该功能未开启")
                         case _:
-                            self.send_message("可用指令：\n清除聊天记录\n开启/关闭函数调用\n开启/关闭思考模式\n网页聊天\n重置密码")
+                            await self.send_message("可用指令：\n清除聊天记录\n开启/关闭函数调用\n开启/关闭思考模式\n网页聊天\n重置密码")
                             break
         except json.JSONDecodeError:
-            self.send_message("指令内容包含提示词注入")
+            await self.send_message("指令内容包含提示词注入")
         except Exception as e:
             logger.error(f"指令处理出现错误: {e}")
-            self.send_message(f"指令处理出现错误")
+            await self.send_message(f"指令处理出现错误")
     else: # 聊天
         time_interval = time.time() - self.last_message_time
         if time_interval > 1700:
@@ -84,21 +84,21 @@ def hook_on_message_receive(self: Handle_private_message, data):
         else:
             self.chat_instance.crop()
         self.last_message_time = time.time()
-        chat(self, data)
+        await chat(self, data)
 
-def hook_on_input(self: Handle_private_message): # 不保证能触发，有人关闭了这个功能
+async def hook_on_input(self: Handle_private_message): # 不保证能触发，有人关闭了这个功能
     # message_send # 要发送的消息 list
     if time.time() - self.last_message_time > 1700:
         self.last_message_time = time.time()
         self.chat_instance.clear()
-        self.send_message("聊聊新话题~")
+        await self.send_message("聊聊新话题~")
 
-def hook_on_quit(self: Handle_private_message):
+async def hook_on_quit(self: Handle_private_message):
     # self.config # 当前用户配置 dict
     with open(f"data/users/{self.user_id}.json", "w", encoding="utf-8") as f:
         json.dump({"thinking": self.user_data.thinking, "enable_function": self.user_data.enable_function, "memory": self.user_data.memory}, f, ensure_ascii=False)
 
-def chat(self: Handle_private_message, data):
+async def chat(self: Handle_private_message, data):
     contains_text = False
     for message in data["message"]:
         match message["type"]:
@@ -107,24 +107,24 @@ def chat(self: Handle_private_message, data):
                 self.chat_instance.add({"type": "text", "text": message["data"]["text"]})
             case "image":
                 if "sub_type" in message["data"] and message["data"]["sub_type"] == 0:
-                    self.chat_instance.add({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{Utils.url_to_b64(message['data']['url'].replace('https', 'http'))}"}})
+                    self.chat_instance.add({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{await Utils.url_to_b64(message['data']['url'].replace('https', 'http'))}"}})
                 else:
                     self.chat_instance.add({"type": "text", "text": "<表情包>"})
             case "json":
                 text = json.loads(message["data"]["data"])
                 self.chat_instance.add({"type": "text", "text": f"<卡片: {text['prompt']}>"})
             case "file":
-                response = requests.post("http://127.0.0.1:3001/get_file", json={"file_id": message["data"]["file_id"]}).json()
+                response = (await Utils.http_client.post("http://127.0.0.1:3001/get_file", json={"file_id": message["data"]["file_id"]})).json()
                 self.chat_instance.add({"type": "text", "text": f"<无法读取的文件: {response['data']['file_name']}>"})
             case "video":
                 self.chat_instance.add({"type": "text", "text": "<视频>"})
             case "record":
                 contains_text = True
-                text = NapcatAPI.transcribe(data["message_id"]) # 此处为data，最上层
+                text = await NapcatAPI.transcribe(data["message_id"]) # 此处为data，最上层
                 self.chat_instance.add({"type": "text", "text": text})
             case "reply":
-                reply_data = NapcatAPI.get_message(message["data"]["id"])
-                text = messages_to_text(reply_data)[1]
+                reply_data = await NapcatAPI.get_message(message["data"]["id"])
+                text = await messages_to_text(reply_data)[1]
                 self.chat_instance.add({"type": "text", "text": "\n".join([f"> {i}" for i in text.splitlines()])})
             case "face":
                 self.chat_instance.add({"type": "text", "text": "<动画表情>"})
@@ -132,13 +132,13 @@ def chat(self: Handle_private_message, data):
                 foward_messages = message["data"]["content"]
                 text = ""
                 for i in foward_messages:
-                    text += messages_to_text(i)[0] + "\n"
+                    text += await messages_to_text(i)[0] + "\n"
                 self.chat_instance.add({"type": "text", "text": f" ```合并转发内容\n{text}``` "})
             case _:
                 self.chat_instance.add({"type": "text", "text": "<未知>"})
     if contains_text:
-        for response in self.chat_instance():
-            self.send_message(response)
+        async for response in self.chat_instance():
+            await self.send_message(response)
 
 def process_first_message_text(data):
     """处理消息列表中的第一个消息文本内容"""
@@ -148,7 +148,7 @@ def process_first_message_text(data):
         return first_message["data"]["text"]
     return ""
 
-def messages_to_text(data) -> tuple[str, str]:
+async def messages_to_text(data) -> tuple[str, str]:
     output_text = ""
     if data["sender"]:
         username = data["sender"]["nickname"]
@@ -163,7 +163,7 @@ def messages_to_text(data) -> tuple[str, str]:
                 output_text += f"\n{message_text}"
             case "image":
                 if ENABLE_OCR:
-                    image_text = API.ocr(message["data"]["url"].replace("https", "http"))
+                    image_text = await API.ocr(message["data"]["url"].replace("https", "http"))
                     output_text += f"\n```图片OCR结果\n{image_text}\n``` "
                 else:
                     output_text += f"\n<图片>"
@@ -175,12 +175,12 @@ def messages_to_text(data) -> tuple[str, str]:
             case "video":
                 output_text += "\n<视频>"
             case "record":
-                text = NapcatAPI.transcribe(data["message_id"]) # 此处为data，最上层
+                text = await NapcatAPI.transcribe(data["message_id"]) # 此处为data，最上层
                 output_text += f"\n{text}"
             case "reply":
-                reply_data = NapcatAPI.get_message(message["data"]["id"])
+                reply_data = await NapcatAPI.get_message(message["data"]["id"])
                 if reply_data:
-                    reply = messages_to_text(reply_data)[1]
+                    reply = await messages_to_text(reply_data)[1]
                 else:
                     reply = "消息不存在"
                 marked_reply = "\n".join([f"> {i}" for i in reply.splitlines()])
@@ -191,7 +191,7 @@ def messages_to_text(data) -> tuple[str, str]:
                 foward_messages = message["data"]["content"]
                 text = ""
                 for i in foward_messages:
-                    text += messages_to_text(i)[0] + "\n"
+                    text += await messages_to_text(i)[0] + "\n"
                 output_text += f"\n```合并转发内容\n{text}``` "
             case "markdown":
                 output_text += f"\n```markdown\n{message['data']['content']}\n```"

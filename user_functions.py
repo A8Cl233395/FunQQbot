@@ -167,24 +167,27 @@ class UserChat:
         self.clear()
     
     def clear(self):
-        # HIGHWAY TO HELL
         self.messages = [{"role": "system", "content": self._build_system_message()}]
         self.contain_image = False
 
     def _build_system_message(self):
+        # HIGHWAY TO HELL
         return self.userdata.prompt_raw.format(memory_block=("\n".join(f"- {p}" if i == 0 else f"  {p}" for item in self.userdata.memory for i, p in enumerate(item.split("\n")))) if self.userdata.memory else "暂无记忆", device="QQ（使用纯文本，不使用LaTeX和表格等）", time=datetime.now().strftime("%Y-%m-%d %A"))
     
-    def _stream_events(self, model, thinking, enable_function):
+    async def _stream_events(self, model, thinking, enable_function):
         """三种协议（chat-completions / responses / anthropic）归一化后的流式事件，chat-completions 为主要格式"""
         api_type = MODELS[model].get("api_type", "chat-completions")
         if api_type == "responses":
-            yield from self._ai_responses(model, thinking, enable_function)
+            async for ev in self._ai_responses(model, thinking, enable_function):
+                yield ev
         elif api_type == "anthropic":
-            yield from self._ai_anthropic(model, thinking, enable_function)
+            async for ev in self._ai_anthropic(model, thinking, enable_function):
+                yield ev
         else:
-            yield from self._ai_completions(model, thinking, enable_function)
+            async for ev in self._ai_completions(model, thinking, enable_function):
+                yield ev
 
-    def _ai_completions(self, model, thinking, enable_function):
+    async def _ai_completions(self, model, thinking, enable_function):
         model_config = MODELS[model]
         params = {
             "model": model,
@@ -197,8 +200,8 @@ class UserChat:
             params["max_completion_tokens"] = model_config["max_tokens"]
         params.update(thinking_params(model_config, thinking, "chat-completions"))
         client = self.vision_oclient if self.contain_image else self.oclient
-        completion = client.chat.completions.create(**params)
-        for chunk in completion:
+        completion = await client.chat.completions.create(**params)
+        async for chunk in completion:
             if not chunk.choices: # wdnmd小米
                 continue
             delta = chunk.choices[0].delta
@@ -213,7 +216,7 @@ class UserChat:
                     if tool_call.function.arguments:
                         yield StreamEvent("tool_args", index=tool_call.index, text=tool_call.function.arguments)
 
-    def _ai_responses(self, model, thinking, enable_function):
+    async def _ai_responses(self, model, thinking, enable_function):
         # responses API 不接受 system role 消息，system 提出到 instructions 参数
         model_config = MODELS[model]
         instructions, input_messages = prepare_responses_messages(self.messages)
@@ -229,10 +232,10 @@ class UserChat:
             params["max_output_tokens"] = model_config["max_tokens"]
         params.update(thinking_params(model_config, thinking, "responses"))
         client = self.vision_oclient if self.contain_image else self.oclient
-        completion = client.responses.create(**params)
+        completion = await client.responses.create(**params)
         call_indices: dict[str, int] = {}
         call_index = 0
-        for event in completion:
+        async for event in completion:
             match event.type:
                 case "response.output_item.added":
                     item = event.item
@@ -249,7 +252,7 @@ class UserChat:
                 case "response.reasoning_text.delta":
                     yield StreamEvent("thinking", text=event.delta)
 
-    def _ai_anthropic(self, model, thinking, enable_function):
+    async def _ai_anthropic(self, model, thinking, enable_function):
         # anthropic 协议不接受 system role 消息，system 提出到顶层参数
         model_config = MODELS[model]
         system, anthropic_messages = prepare_anthropic_messages(self.messages)
@@ -265,8 +268,8 @@ class UserChat:
         client = Utils.aclient(model)
         tool_indices = {}
         tool_index = 0
-        with client.messages.stream(**params) as chunk_stream:
-            for event in chunk_stream:
+        async with client.messages.stream(**params) as chunk_stream:
+            async for event in chunk_stream:
                 if isinstance(event, ContentBlockStartEvent):
                     if isinstance(event.content_block, ToolUseBlock):
                         tool_indices[event.index] = tool_index
@@ -282,7 +285,7 @@ class UserChat:
                         if index is not None:
                             yield StreamEvent("tool_args", index=index, text=event.delta.partial_json)
     
-    def __call__(self):
+    async def __call__(self):
         model = self.userdata.vision_model if self.contain_image else self.userdata.model
         thinking = self.userdata.thinking
         enable_function = self.userdata.enable_function
@@ -293,7 +296,7 @@ class UserChat:
             is_thinking = False
             tool_calls = []
             tool_responses = []
-            for ev in self._stream_events(model, thinking, enable_function):
+            async for ev in self._stream_events(model, thinking, enable_function):
                 if ev.kind == "thinking":
                     is_thinking = True
                     reasoning_content += ev.text
@@ -310,7 +313,7 @@ class UserChat:
                         buffer = ""
                     if tool_calls: # 处理旧的（完成生成的）tool call
                         yield self._tool_call_json_parser(tool_calls[-1])
-                        tool_responses.append(self._handle_tool_call(tool_calls[-1]))
+                        tool_responses.append(await self._handle_tool_call(tool_calls[-1]))
                     if ev.index is not None:
                         while len(tool_calls) <= ev.index:
                             tool_calls.append(None)
@@ -346,12 +349,13 @@ class UserChat:
             else:
                 # 处理最后一个tool call
                 yield self._tool_call_json_parser(tool_calls[-1])
-                tool_responses.append(self._handle_tool_call(tool_calls[-1]))
+                tool_responses.append(await self._handle_tool_call(tool_calls[-1]))
                 self.messages.append({"role": "assistant", "content": answering_content, "tool_calls": tool_calls})
                 if is_thinking:
                     self.messages[-1]["reasoning_content"] = reasoning_content
                 self.messages.extend(tool_responses)
-                yield from self.__call__() # 直到ai完成所有操作
+                async for item in self.__call__(): # 直到ai完成所有操作
+                    yield item
         except Exception as e:
             id = os.urandom(4).hex()
             yield f"---Error ! Trace id: {id}---"
@@ -365,15 +369,15 @@ class UserChat:
                     break
             yield "成功回滚到上一回合消息"
     
-    def _handle_tool_call(self, tool_call: dict):
+    async def _handle_tool_call(self, tool_call: dict):
         tool_call_id = tool_call["id"]
         try:
             arguments_json = json.loads(tool_call["function"]["arguments"])
             match tool_call["function"]["name"]:
                 case "readURL":
-                    content = Utils.customize_reader(arguments_json["url"])
+                    content = await Utils.customize_reader(arguments_json["url"])
                 case "searchWeb":
-                    content = API.search(query=arguments_json["query"])
+                    content = await API.search(query=arguments_json["query"])
                 case "manageMemory":
                     if arguments_json["operation"] == "add":
                         mem = arguments_json["memory"]
@@ -385,12 +389,12 @@ class UserChat:
                             content = f"记忆已满！"
                         else:
                             self.userdata.memory.append(mem)
-                            Sync.add_memory(self.userdata.user_id, mem)
+                            await Sync.add_memory(self.userdata.user_id, mem)
                             content = f"记忆已添加！"
                     elif arguments_json["operation"] == "remove":
                         try:
                             self.userdata.memory.remove(arguments_json["memory"])
-                            Sync.remove_memory(self.userdata.user_id, arguments_json["memory"])
+                            await Sync.remove_memory(self.userdata.user_id, arguments_json["memory"])
                             content = f"记忆已删除！"
                         except ValueError:
                             content = f"记忆 {arguments_json['memory']} 不存在！"
@@ -459,7 +463,6 @@ class UserChat:
 class Sync:
     URI = REMOTE_WEBSOCKET_URI
     KEY = REMOTE_API_KEY
-    loop = None
     websocket = None
     desynchronized: dict[str, list[str]] = {}
     
@@ -473,7 +476,6 @@ class Sync:
                 cls.desynchronized = json.load(f)
         while True: # reconnect
             try:
-                cls.loop = asyncio.get_event_loop()
                 cls.websocket = await websockets.connect(cls.URI, additional_headers={"key": cls.KEY}, open_timeout=10)
                 logger.info("已连接到同步服务器")
                 if cls.desynchronized:
@@ -485,7 +487,7 @@ class Sync:
                         data = json.loads(message)
                         logger.debug(f"Sync received message: {data}")
                         if data["user"] not in users:
-                            init_user(data["user"])
+                            await init_user(data["user"])
                         user = users[data["user"]]
                         match data["type"]:
                             case "memory":
@@ -512,7 +514,7 @@ class Sync:
                 continue
     
     @classmethod
-    def _send(cls, data: dict):
+    async def _send(cls, data: dict):
         if not cls.URI:
             return
         if cls.websocket is None:
@@ -524,11 +526,7 @@ class Sync:
                 if "memory" not in user:
                     user.append("memory")
             return
-        if cls.loop is not None and cls.loop.is_running():
-            asyncio.run_coroutine_threadsafe(
-                cls.websocket.send(json.dumps(data, ensure_ascii=False)), 
-                cls.loop
-            )
+        await cls.websocket.send(json.dumps(data, ensure_ascii=False))
         logger.debug(f"Sync sent message: {data}")
     
     @classmethod
@@ -542,8 +540,8 @@ class Sync:
         cls.desynchronized.clear()
     
     @classmethod
-    def add_memory(cls, user_id: int, mem: str):
-        cls._send({
+    async def add_memory(cls, user_id: int, mem: str):
+        await cls._send({
             "user": user_id,
             "type": "memory",
             "operate": "add",
@@ -551,8 +549,8 @@ class Sync:
         })
     
     @classmethod
-    def remove_memory(cls, user_id: int, mem: str):
-        cls._send({
+    async def remove_memory(cls, user_id: int, mem: str):
+        await cls._send({
             "user": user_id,
             "type": "memory",
             "operate": "remove",
