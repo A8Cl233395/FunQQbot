@@ -67,12 +67,16 @@ deepseek-v4-flash:
   url: https://...
   vision: true               # 是否具备视觉能力（可选）
   max_tokens: 8192           # anthropic 协议必填（可选）
+  extra_header:              # 附加 HTTP 请求头（可选）
+    X-Custom-Header: value
+  extra_body:                # 附加请求体参数，合并到所有请求（可选）
+    temperature: 0.7
   thinking:                  # 思考模式参数（可选）
     can_nonthink: true       # 允许关闭思考
     effort: high             # 思考力度
     on_param: enabled        # anthropic 协议的 thinking.type
     request_summary: true    # 请求思考摘要（responses 协议）
-    extra_body:              # chat-completions 直传 extra_body，优先生效
+    extra_body:              # chat-completions 直传 extra_body，优先于模型级 extra_body 生效
       'true':  { enable_thinking: true }
       'false': { enable_thinking: false }
 ```

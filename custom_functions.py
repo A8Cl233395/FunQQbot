@@ -189,38 +189,42 @@ def prepare_anthropic_messages(messages: list) -> tuple[list, list]:
         anthropic_messages.append({"role": msg["role"], "content": content})
     return system, anthropic_messages
 
-def thinking_params(model_config: dict, thinking: bool, api_type: str = "chat-completions") -> dict:
-    """按协议生成思考模式参数。api_type 缺省为 chat-completions（主要格式）"""
+def construct_params(model_config: dict, thinking: bool, api_type: str = "chat-completions") -> dict:
     thinking_config = model_config.get("thinking")
-    if not thinking_config:
-        return {}
-    if api_type == "anthropic":
-        if not thinking and thinking_config.get("can_nonthink", False):
-            return {"thinking": {"type": "disabled"}}
-        params: dict = {}
-        if thinking_config.get("request_summary", False):
-            params["thinking"] = {"type": "adaptive", "display": "summarized"}
+    params: dict = {}
+    if thinking_config:
+        if api_type == "anthropic":
+            if not thinking and thinking_config.get("can_nonthink", False):
+                params["thinking"] = {"type": "disabled"}
+            else:
+                if thinking_config.get("request_summary", False):
+                    params["thinking"] = {"type": "adaptive", "display": "summarized"}
+                else:
+                    params["thinking"] = {"type": thinking_config["on_param"]}
+                if "effort" in thinking_config:
+                    params["output_config"] = {"effort": thinking_config["effort"]}
+                elif thinking_config.get("budget_tokens", False):
+                    params["thinking"]["budget_tokens"] = thinking_config["budget_tokens"]
+        elif api_type == "responses":
+            reasoning = {}
+            if not thinking and thinking_config.get("can_nonthink", False): # 不思考
+                reasoning["effort"] = "none"
+            else:
+                reasoning["effort"] = thinking_config["effort"]
+            if thinking_config.get("request_summary", False): # 要求思考摘要
+                reasoning["summary"] = "auto"
+            params["reasoning"] = reasoning
+        elif "extra_body" in thinking_config: # chat-completions 优先 extra_body
+            params["extra_body"] = thinking_config["extra_body"]["true"] if thinking else thinking_config["extra_body"]["false"]
+        elif not thinking and thinking_config.get("can_nonthink", False): # chat-completions 不思考
+            params["reasoning_effort"] = "none"
         else:
-            params["thinking"] = {"type": thinking_config["on_param"]}
-        if "effort" in thinking_config:
-            params["output_config"] = {"effort": thinking_config["effort"]}
-        elif thinking_config.get("budget_tokens", False):
-            params["thinking"]["budget_tokens"] = thinking_config["budget_tokens"]
-        return params
-    elif api_type == "responses":
-        reasoning = {}
-        if not thinking and thinking_config.get("can_nonthink", False): # 不思考
-            reasoning["effort"] = "none"
-        else:
-            reasoning["effort"] = thinking_config["effort"]
-        if thinking_config.get("request_summary", False): # 要求思考摘要
-            reasoning["summary"] = "auto"
-        return {"reasoning": reasoning}
-    if "extra_body" in thinking_config: # chat-completions 优先 extra_body
-        return {"extra_body": thinking_config["extra_body"]["true"] if thinking else thinking_config["extra_body"]["false"]}
-    if not thinking and thinking_config.get("can_nonthink", False): # chat-completions 不思考
-        return {"reasoning_effort": "none"}
-    return {"reasoning_effort": thinking_config["effort"]}
+            params["reasoning_effort"] = thinking_config["effort"]
+    if "extra_body" in model_config: # 合并模型级 extra_body，thinking 的同名键优先
+        params["extra_body"] = {**model_config["extra_body"], **(params.get("extra_body") or {})}
+    if model_config.get("extra_header"): # 附加请求头，随该模型的所有请求发送
+        params["extra_headers"] = model_config["extra_header"]
+    return params
 
 class API:
     uri = REMOTE_API_URL
@@ -301,14 +305,14 @@ class Utils:
     def oclient(cls, model) -> AsyncOpenAI:
         url = MODELS[model]["url"]
         if url not in cls.oclients:
-            cls.oclients[url] = AsyncOpenAI(api_key=MODELS[model]["api_key"], base_url=MODELS[model]["url"])
+            cls.oclients[url] = AsyncOpenAI(api_key=MODELS[model]["api_key"], base_url=url)
         return cls.oclients[url]
 
     @classmethod
     def aclient(cls, model) -> AsyncAnthropic:
         url = MODELS[model]["url"]
         if url not in cls.aclients:
-            cls.aclients[url] = AsyncAnthropic(api_key=MODELS[model]["api_key"], base_url=MODELS[model]["url"])
+            cls.aclients[url] = AsyncAnthropic(api_key=MODELS[model]["api_key"], base_url=url)
         return cls.aclients[url]
     
     @staticmethod
@@ -362,7 +366,7 @@ class Bigmodel:
                 "system": system if prompt else [],  # type: ignore
                 "stream": False
             }
-            params.update(thinking_params(MODELS[model], thinking, api_type))
+            params.update(construct_params(MODELS[model], thinking, api_type))
             response = await Utils.aclient(model).messages.create(**params)
             return "\n".join(block.text for block in response.content if isinstance(block, TextBlock))
         if api_type == "responses":
@@ -373,7 +377,7 @@ class Bigmodel:
                 "input": input_messages,
                 "stream": False
             }
-            params.update(thinking_params(MODELS[model], thinking, api_type))
+            params.update(construct_params(MODELS[model], thinking, api_type))
             response = await Utils.oclient(model).responses.create(**params)
             return response.output_text
         client = Utils.oclient(model)
@@ -382,7 +386,7 @@ class Bigmodel:
             "messages": messages,
             "stream": False
         }
-        params.update(thinking_params(MODELS[model], thinking, api_type))
+        params.update(construct_params(MODELS[model], thinking, api_type))
         response = await client.chat.completions.create(**params)
         return response.choices[0].message.content
     
@@ -399,7 +403,7 @@ class Bigmodel:
                 "system": system,
                 "stream": False
             }
-            params.update(thinking_params(MODELS[model], thinking, api_type))
+            params.update(construct_params(MODELS[model], thinking, api_type))
             response = await Utils.aclient(model).messages.create(**params)
             return "\n".join(block.text for block in response.content if isinstance(block, TextBlock))
         if api_type == "responses":
@@ -410,7 +414,7 @@ class Bigmodel:
                 "input": input_messages,
                 "stream": False
             }
-            params.update(thinking_params(MODELS[model], thinking, api_type))
+            params.update(construct_params(MODELS[model], thinking, api_type))
             response = await Utils.oclient(model).responses.create(**params)
             return response.output_text
         client = Utils.oclient(model)
@@ -420,7 +424,7 @@ class Bigmodel:
             "response_format": {"type": "json_object"},
             "stream": False
         }
-        params.update(thinking_params(MODELS[model], thinking, api_type))
+        params.update(construct_params(MODELS[model], thinking, api_type))
         response = await client.chat.completions.create(**params)
         return response.choices[0].message.content
 

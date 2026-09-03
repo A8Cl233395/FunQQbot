@@ -198,7 +198,7 @@ class UserChat:
             params["tools"] = self.tools
         if "max_tokens" in model_config:
             params["max_completion_tokens"] = model_config["max_tokens"]
-        params.update(thinking_params(model_config, thinking, "chat-completions"))
+        params.update(construct_params(model_config, thinking, "chat-completions"))
         client = self.vision_oclient if self.contain_image else self.oclient
         completion = await client.chat.completions.create(**params)
         async for chunk in completion:
@@ -230,7 +230,7 @@ class UserChat:
             params["tools"] = self.responses_tools
         if "max_tokens" in model_config:
             params["max_output_tokens"] = model_config["max_tokens"]
-        params.update(thinking_params(model_config, thinking, "responses"))
+        params.update(construct_params(model_config, thinking, "responses"))
         client = self.vision_oclient if self.contain_image else self.oclient
         completion = await client.responses.create(**params)
         call_indices: dict[str, int] = {}
@@ -264,7 +264,7 @@ class UserChat:
         }
         if enable_function:
             params["tools"] = self.anthropic_tools
-        params.update(thinking_params(model_config, thinking, "anthropic"))
+        params.update(construct_params(model_config, thinking, "anthropic"))
         client = Utils.aclient(model)
         tool_indices = {}
         tool_index = 0

@@ -32,6 +32,10 @@ MODELS:
     api_type: chat-completions
     desc: "Kimi K2.6"
     vision: true
+    # extra_header:                  # 可选，附加 HTTP 请求头
+    #   X-Custom-Header: value
+    # extra_body:                    # 可选，附加请求体参数，合并到所有请求
+    #   temperature: 0.7
     api_key: xxx
     url: https://opencode.ai/zen/go/v1
   qwen3.7-plus:
