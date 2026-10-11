@@ -19,7 +19,7 @@ async def hook_init(self: "Handle_private_message", config: dict):
         memory=data["memory"],
         thinking=data["thinking"],
         enable_function=data["enable_function"],
-        prompt_raw=config["CHAT_PROMPT_RAW"],
+        prompt_raw=config["CHAT_PROMPT_RAW"]
     )
     self.chat_instance = UserChat(self.user_data)
     self.last_message_time = time.time()
@@ -97,6 +97,8 @@ async def hook_on_quit(self: Handle_private_message):
     # self.config # 当前用户配置 dict
     with open(f"data/users/{self.user_id}.json", "w", encoding="utf-8") as f:
         json.dump({"thinking": self.user_data.thinking, "enable_function": self.user_data.enable_function, "memory": self.user_data.memory}, f, ensure_ascii=False)
+    if os.path.exists(f"data/dirty/{self.user_id}"):
+        os.remove(f"data/dirty/{self.user_id}")
 
 async def chat(self: Handle_private_message, data):
     contains_text = False

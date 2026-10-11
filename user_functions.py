@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from handlers import *
 
 class UserChat:
@@ -198,6 +200,7 @@ class UserChat:
             params["tools"] = self.tools
         if "max_tokens" in model_config:
             params["max_completion_tokens"] = model_config["max_tokens"]
+            params["max_tokens"] = model_config["max_tokens"]
         params.update(construct_params(model_config, thinking, "chat-completions"))
         client = self.vision_oclient if self.contain_image else self.oclient
         completion = await client.chat.completions.create(**params)
@@ -474,13 +477,19 @@ class Sync:
         if os.path.exists("data/desynchronized.json"):
             with open("data/desynchronized.json", "r", encoding="utf-8") as f:
                 cls.desynchronized = json.load(f)
+            # JSON 的 dict 键恒为 string，而 users/user_id 全程用 int，不归一化则推送积压时 KeyError 死循环重连
+            cls.desynchronized = {int(k): v for k, v in cls.desynchronized.items()}
+        dirty_users = [int(i) for i in os.listdir("data/dirty") if i.isdigit()]
         while True: # reconnect
             try:
                 cls.websocket = await websockets.connect(cls.URI, additional_headers={"key": cls.KEY}, open_timeout=10)
                 logger.info("已连接到同步服务器")
                 if cls.desynchronized:
                     logger.info("有未同步数据，开始全量同步...")
-                    await cls._sync_all_users()
+                    await cls._push_users()
+                if dirty_users:
+                    logger.info("有未保存的用户数据，正在拉取...")
+                    await cls._request_users(dirty_users)
                 cls.desynchronized.clear()
                 async for message in cls.websocket:
                     try:
@@ -489,12 +498,16 @@ class Sync:
                         if data["user"] not in users:
                             await init_user(data["user"])
                         user = users[data["user"]]
+                        cls.create_dirty(data["user"])
                         match data["type"]:
                             case "memory":
                                 if data["operate"] == "add":
                                     user.user_data.memory.append(data["data"])
                                 elif data["operate"] == "remove":
                                     user.user_data.memory.remove(data["data"])
+                                elif data["operate"] == "sync":
+                                    if data["data"] is not None:
+                                        user.user_data.memory = data["data"]
                     except Exception as e:
                         logger.exception(f"Sync error: {e}")
             except asyncio.TimeoutError:
@@ -525,22 +538,31 @@ class Sync:
             if data["type"] == "memory":
                 if "memory" not in user:
                     user.append("memory")
+            cls.save() # 立即持久化积压：强停时退出钩子不会执行，不落盘则断线期间的变更彻底丢失
             return
         await cls.websocket.send(json.dumps(data, ensure_ascii=False))
         logger.debug(f"Sync sent message: {data}")
     
     @classmethod
-    async def _sync_all_users(cls):
+    async def _push_users(cls):
         for user_id in cls.desynchronized:
+            if user_id not in users:
+                await init_user(user_id) # 积压可能引用未实例化的用户（崩溃恢复场景），先从磁盘加载
             user = cls.desynchronized[user_id]
             payload = {"user": user_id, "type": "sync", "operate": "push_all"}
             if "memory" in user:
                 payload["memory"] = users[user_id].user_data.memory
             await cls.websocket.send(json.dumps(payload, ensure_ascii=False))
         cls.desynchronized.clear()
+
+    @classmethod
+    async def _request_users(cls, user_ids: list):
+        for user_id in user_ids:
+            await cls.websocket.send(json.dumps({"user": user_id, "type": "sync", "operate": "pull_all"}, ensure_ascii=False))
     
     @classmethod
     async def add_memory(cls, user_id: int, mem: str):
+        cls.create_dirty(user_id) # 先标记后变更：崩溃窗口内标记必在
         await cls._send({
             "user": user_id,
             "type": "memory",
@@ -550,6 +572,7 @@ class Sync:
     
     @classmethod
     async def remove_memory(cls, user_id: int, mem: str):
+        cls.create_dirty(user_id) # 先标记后变更：崩溃窗口内标记必在
         await cls._send({
             "user": user_id,
             "type": "memory",
@@ -561,3 +584,10 @@ class Sync:
     def save(cls):
         with open("data/desynchronized.json", "w", encoding="utf-8") as f:
             json.dump(cls.desynchronized, f, ensure_ascii=False, indent=4)
+
+    @classmethod
+    def create_dirty(cls, user_id):
+        path = Path(f"data/dirty/{user_id}")
+        if not path.exists(): # 存在即脏，天然幂等，不重复写
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
