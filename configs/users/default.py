@@ -1,5 +1,12 @@
 from user_functions import *
 
+# 陷阱：
+# - 新增 / 指令必须同步更新 COMMAND_CHECK_PROMPT（configs/users/default.yaml）；意图由小模型分类，
+#   只改这里的 match 不会生效。
+# - 指令只识别第一条消息且必须以 / 开头（process_first_message_text）；图片开头的消息不会触发指令。
+# - 用户状态只在 hook_on_quit 写入 data/users/{id}.json；强退依赖 data/dirty 标记在重连时回拉。
+# - 超过 1700s 没有消息会清空上下文。
+
 async def hook_init(self: "Handle_private_message", config: dict):
     # self.config # 当前用户配置 dict
     self.command_check_prompt = config["COMMAND_CHECK_PROMPT"]

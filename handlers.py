@@ -8,6 +8,11 @@ import json
 import websockets
 from custom_functions import *
 
+# 陷阱：
+# - 导入链单向：main -> user_functions -> handlers -> custom_functions -> base_settings。
+#   各层通过 import * 共享 users/groups/logger/MODELS/API 等全局状态；新增模块放在最低需要层，保持无环。
+# - 群/用户配置在首次收到消息、实例化处理器时读取一次，之后修改 YAML 不会热重载，必须重启。
+
 username_cache = LRUCache(500, allow_reverse=True)
 
 default_modules: dict[str, ModuleType] = {}
@@ -43,6 +48,9 @@ class Handle_group_message:
 
     def load_custom_script(self) -> ModuleType | None:
         """动态加载对应的群组脚本"""
+        # 陷阱：default.py 按路径缓存，{id}.py 每个实例都会重新 exec。
+        # 群脚本必须同时实现 hook_init/hook_on_message_receive/hook_on_quit，缺一个就整体丢弃；
+        # 失败只告警不抛错，表现为“机器人没反应”，排查时先看启动日志。
         specific_path = f"configs/groups/{self.group_id}.py"
         script_path = specific_path if os.path.exists(specific_path) else "configs/groups/default.py"
         try:
@@ -108,6 +116,9 @@ class Handle_private_message:
     
     def load_custom_script(self) -> ModuleType | None:
         """动态加载对应的群组脚本"""
+        # 陷阱：default.py 按路径缓存，{id}.py 每个实例都会重新 exec。
+        # 用户脚本还必须额外实现 hook_on_input，缺任意一个就整体丢弃；只告警不抛错，
+        # 表现为“机器人没反应”，排查时先看日志。
         specific_path = f"configs/users/{self.user_id}.py"
         script_path = specific_path if os.path.exists(specific_path) else "configs/users/default.py"
         try:
@@ -188,6 +199,7 @@ class Handle_friend_request:
 
 user_locks: dict[int, asyncio.Lock] = {}
 group_locks: dict[int, asyncio.Lock] = {}
+# 陷阱：每条群/私聊消息在独立协程中处理，但按群号/QQ号用对应锁串行化，不要绕过锁直接调 on_receive_message。
 groups: dict[int, Handle_group_message] = {}
 users: dict[int, Handle_private_message] = {}
 user_last_input_time: dict[int, float] = {}
@@ -208,12 +220,14 @@ async def push_to_websocket(message):
         logger.debug(f"Websocket sent message: {message}")
 
 async def _push_with_delay(message, delay=0.05):
+    # 陷阱：所有出站消息共用一把锁并固定延迟 0.05s，用于保持顺序；不要绕开 push_to_websocket 直接 send。
     async with lock:
         await asyncio.sleep(delay)
         await websocket_connect.send(message)
 
 async def handler(websocket):
     global websocket_connect
+    # 陷阱：同一时刻只接受一个 NapCat 连接，第二个连接进来直接 return（不会报错）。
     if websocket_connect:
         return
     websocket_connect = websocket

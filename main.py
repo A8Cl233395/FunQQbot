@@ -1,5 +1,9 @@
 from user_functions import *
 
+# 陷阱：
+# - 必须在仓库根目录启动；配置与 data 路径都是相对路径。
+# - 退出顺序固定：取消 Sync 任务并落盘 -> 保存各群/用户状态 -> os._exit(0)；强停不会执行保存。
+
 async def main():
     server = await websockets.serve(handler, "0.0.0.0", 8080)
     sync = asyncio.create_task(Sync.connect())

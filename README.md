@@ -10,16 +10,14 @@
 
 - **通信层**：QQ 消息由 NapCat（OneBot v11 协议）接收。NapCat 作为 WebSocket 客户端主动连入本程序的 `ws://0.0.0.0:8080`（main.py 为服务端），上行推送消息、下行发送动作；辅助信息拉取（get_stranger_info / get_msg / get_file / fetch_ptt_text 等）则由本程序 POST 到 NapCat 的 HTTP 服务器 `http://127.0.0.1:3001`。
 - **处理层**：模块导入链单向为 `main.py` → `user_functions.py` → `handlers.py` → `custom_functions.py` → `base_settings.py`，各层靠 `import *` 共享全局状态（`users` / `groups` 字典、`logger`、`MODELS`、`API` 等）。收到的每条群/私聊消息在独立协程中处理，用每群/每用户锁串行化；出站消息经全局锁加 0.05s 延迟投递防乱序。
-- **远程 API**：OCR、网页搜索、网页阅读、B站/网易云解析、好友邀请验证等能力依赖独立部署的远程 API 服务，启动时校验其可用性（`/status` 要求 `version == "6"`），且启用的功能必须与服务能力匹配，否则直接退出。
-- **记忆同步**：私聊记忆通过 Sync 类经 `REMOTE_WEBSOCKET_URI` 与远程 API 双向同步，断线期间积压至 `data/desynchronized.json`，重连后全量推送。
-
-- 各层靠 `import *` 共享全局状态（`users` / `groups` 字典、`logger`、`MODELS`、`API` 等），导入链单向。
-- 收到的每条群/私聊消息在独立协程中处理，用每群/每用户锁串行化；出站消息经全局锁加 0.05s 延迟投递防乱序。
-- 启动时即校验远程 API（`/status` 要求 `version == "6"`），且启用的功能必须与远程服务能力匹配，否则直接退出。
+- **远程 API**：OCR、网页搜索、网页阅读、B站/网易云解析、好友邀请验证、网页聊天等能力依赖独立部署的 [BingScraperApi](https://github.com/A8Cl233395/BingScraperApi) 远程服务，启动时校验其可用性（`/status` 要求 `version == "8"`），且启用的功能必须与服务能力匹配，否则直接退出。
+- **记忆同步**：私聊记忆通过 Sync 类经 `REMOTE_WEBSOCKET_URI` 与远程 API 双向同步，断线期间积压至 `data/desynchronized.json`，重连后全量推送；`data/dirty/{id}` 标记崩溃后待回拉的用户。
 
 ## 快速开始
 
 详细安装步骤见 [docs/installation.md](docs/installation.md)。概要：
+
+环境：Python 3.11.9（Windows x64），另需部署上文的远程 API 服务（`/status` 需返回 `version == "8"`）。
 
 1. 安装 QQ 客户端与 NapCat Shell，NapCat 控制面板中配置：
    - **HTTP 服务器**：`127.0.0.1:3001`，消息格式 `array`
@@ -113,7 +111,8 @@ async def hook_on_quit(self):
 ### 运行时状态 data/
 
 - `data/users/{user_id}.json`：私聊用户的 `thinking` / `enable_function` / `memory`，退出时由 `hook_on_quit` 写入
-- `data/desynchronized.json`：断线期间待同步的记忆积压，重连后全量推送
+- `data/desynchronized.json`：断线期间待同步的记忆积压，重连后全量推送；断线时立即落盘，避免强停丢失
+- `data/dirty/{user_id}`：未保存标记；崩溃恢复后重连时据此向服务端拉取该用户的完整记忆，正常退出时删除
 
 ## 功能细节
 
@@ -121,7 +120,7 @@ async def hook_on_quit(self):
 
 以 `/` 开头的消息由小模型做意图分类后执行：
 
-`清除聊天记录`、`开启/关闭函数调用`、`开启/关闭思考模式`、`网页聊天`（需 `ALLOW_WEBCHAT`）、`重置密码`。
+`清除聊天记录`、`开启/关闭函数调用`、`开启/关闭思考模式`、`网页聊天`、`重置密码`（后两者需 `ALLOW_WEBCHAT`）。
 
 ### 函数调用（function calling）
 
@@ -131,11 +130,11 @@ async def hook_on_quit(self):
 - `readURL(url)` —— 读网页，域名特判自动转用 B站视频解析 / 网易云歌词解析
 - `manageMemory(operation, memory)` —— 管理 AI 调用的永久记忆并跨设备同步；单条 ≤500 字符，最多 50 条
 
-> 新增工具需同步修改 3 处：`user_functions.py` 中 `UserChat.tools` / `responses_tools` / `anthropic_tools`（schema）、`_handle_tool_call`（执行逻辑）、`_tool_call_json_parser`（流式展示）。
+> 新增工具需同步修改 5 处：`user_functions.py` 中 `UserChat.tools` / `responses_tools` / `anthropic_tools`（三套 schema）、`_handle_tool_call`（执行逻辑）、`_tool_call_json_parser`（流式展示）。
 
 ### 错误恢复
 
-AI 调用抛出异常时会输出 trace id 并回滚本回合消息到上一条 user 消息。
+AI 调用抛出异常时会输出 trace id，并把本回合消息回滚到本轮 user 消息之前（该条 user 消息也会被移除），以便重试。
 
 ## 项目结构
 
@@ -143,14 +142,14 @@ AI 调用抛出异常时会输出 trace id 并回滚本回合消息到上一条 
 QQBot/
 ├── main.py                # 入口：WebSocket 服务端 + Sync 任务 + 退出保存
 ├── base_settings.py       # 日志、base.yaml 加载、启动时远程 API 校验
-├── custom_functions.py    # API/NapcatAPI/Utils/Bigmodel/Sync事件归一化等基础能力
+├── custom_functions.py    # API/NapcatAPI/Utils/Bigmodel/协议转换与流式事件归一化等基础能力
 ├── handlers.py            # NapCat 消息分发、群/用户处理器、好友申请验证
 ├── user_functions.py      # UserChat 流式对话、函数调用、Sync 记忆同步
 ├── configs/
 │   ├── base-template.yaml # 主配置模板（复制为 base.yaml）
 │   ├── groups/            # default.yaml/default.py + {群号}.yaml/.py
 │   └── users/             # default.yaml/default.py + {QQ号}.yaml/.py
-├── data/                  # 用户状态 JSON、同步积压
+├── data/                  # 用户状态 JSON、dirty 标记、同步积压
 ├── docs/installation.md   # 详细安装指南
 └── requirements.txt       # openai anthropic PyYAML httpx websockets pillow
 ```
@@ -159,8 +158,9 @@ QQBot/
 
 - 配置不支持热重载；运行期改动需重启进程
 - 同一时刻只接受一个 NapCat 连接
+- 启动依赖可访问的远程 API，且版本必须为 `8`
 - 仅在 Windows 上测试过部署流程
-- 无自动化测试，验证方式只有真实运行 `python main.py`
+- 无自动化测试，验证方式只有真实运行 `python main.py`；外部服务未启动时可用 `python -m py_compile <文件>` 做语法检查
 
 ## 许可证
 

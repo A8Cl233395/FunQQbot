@@ -1,5 +1,11 @@
 from handlers import *
 
+# 陷阱：
+# - 本文件靠 `from handlers import *` 间接取得依赖，但整条导入链没有任何模块导入 re；
+#   ai_reply 里的 re.sub 会抛 NameError。改 @ 提及时请在此显式 `import re`。
+# - 群配置在处理器首次实例化时读取一次，运行期修改 YAML 无效。
+# - 只有被 @ 或开启 IDLE_REPLY_TIME 后闲置才会调用大模型；普通消息只进入聊天记录。
+
 async def hook_init(self: Handle_group_message, config: dict):
     # self.config # 当前群组配置 dict
     self.prompt = config['PROMPT']

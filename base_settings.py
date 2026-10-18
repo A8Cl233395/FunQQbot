@@ -4,6 +4,14 @@ import asyncio
 import httpx
 import logging
 
+# 陷阱：
+# - 本模块在 import 阶段就会异步校验远程 API，任何导入方都会产生副作用；校验失败直接 exit(1)，
+#   所以不能用 `python -c "import ..."` 检查代码，改完只能 py_compile 或真实运行。
+# - 配置/数据全部使用相对路径，必须从仓库根目录启动。
+# - 远程 API 的 /status 必须返回 version == "8"（README 中写的 "6" 已过时）。
+# - base-template.yaml 里的 ENABLE_STT 与 MODELS.*.hidden 当前代码并不读取，不要被模板误导。
+# - 启用的功能必须与远程服务能力匹配（ocr/link/invite/webchat），否则直接退出。
+
 # 配置日志
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)

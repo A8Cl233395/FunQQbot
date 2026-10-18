@@ -3,6 +3,9 @@ from pathlib import Path
 from handlers import *
 
 class UserChat:
+    # 陷阱：新增函数调用工具必须同步修改 5 处——
+    # tools / responses_tools / anthropic_tools（三套 schema）、_handle_tool_call（执行）、
+    # _tool_call_json_parser（流式展示）；漏改会导致某种协议下工具不可用或展示报错。
     tools = [
         {
             "type": "function",
@@ -174,6 +177,8 @@ class UserChat:
 
     def _build_system_message(self):
         # HIGHWAY TO HELL
+        # CHAT_PROMPT_RAW 必须能 format 这三个占位符：{memory_block} / {time} / {device}；
+        # 自定义提示词里多写花括号会触发 KeyError。
         return self.userdata.prompt_raw.format(memory_block=("\n".join(f"- {p}" if i == 0 else f"  {p}" for item in self.userdata.memory for i, p in enumerate(item.split("\n")))) if self.userdata.memory else "暂无记忆", device="QQ（使用纯文本，不使用LaTeX和表格等）", time=datetime.now().strftime("%Y-%m-%d %A"))
     
     async def _stream_events(self, model, thinking, enable_function):
@@ -360,6 +365,8 @@ class UserChat:
                 async for item in self.__call__(): # 直到ai完成所有操作
                     yield item
         except Exception as e:
+            # 陷阱：出错时把本回合消息回滚到最后一条 user 之前，会丢弃已经流式输出的 assistant/tool 消息，
+            # 这是预期行为；排查时不要误以为消息丢失是裁剪逻辑导致。
             id = os.urandom(4).hex()
             yield f"---Error ! Trace id: {id}---"
             logger.exception(f"Error in {id}: {str(e)}")
@@ -464,6 +471,10 @@ class UserChat:
                             break
 
 class Sync:
+    # 陷阱：
+    # - desynchronized.json 里的用户键从 JSON 读回来是 str，必须转成 int，否则推送积压时 KeyError、无限重连。
+    # - data/dirty/{id} 是“未保存”标记：退出钩子正常执行才会删除；崩溃后重连时据此向服务端拉取全量记忆。
+    # - 断线积压必须立即落盘（强停不会执行退出钩子），不要改成退出时统一保存。
     URI = REMOTE_WEBSOCKET_URI
     KEY = REMOTE_API_KEY
     websocket = None

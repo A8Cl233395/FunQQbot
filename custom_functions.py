@@ -20,6 +20,12 @@ import time
 import asyncio
 import httpx
 
+# 陷阱：
+# - 内部消息统一使用 OpenAI chat-completions 格式；responses/anthropic 只在请求前由
+#   prepare_* 转换，流式响应再由 _stream_events 归一化成 StreamEvent。新增协议功能时三处都要顾及。
+# - 各厂商返回的 delta 字段不统一（reasoning_content、空 choices、tool_call index 为 None 等），
+#   已在 UserChat 的流式解析里做兼容，改动时保留这些兜底。
+
 class LRUCache:
     def __init__(self, capacity=50, allow_reverse=False):
         self.capacity = capacity
@@ -190,6 +196,8 @@ def prepare_anthropic_messages(messages: list) -> tuple[list, list]:
     return system, anthropic_messages
 
 def construct_params(model_config: dict, thinking: bool, api_type: str = "chat-completions") -> dict:
+    # 陷阱：thinking.extra_body 合并时优先于模型级 extra_body，顺序不能反；
+    # anthropic 请求必须提供 max_tokens（缺失会在调用处 KeyError），responses 不接受 system role。
     thinking_config = model_config.get("thinking")
     params: dict = {}
     if thinking_config:
