@@ -14,4 +14,3 @@ AGENTS.md
 data/users/**
 data/desynchronized.json
 data/dirty/*
-data/dirty/

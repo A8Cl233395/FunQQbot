@@ -2,14 +2,14 @@
 
 基于 Python 与 [NapCat](https://github.com/NapNeko/NapCatQQ)（OneBot v11）的 QQ 机器人，支持私聊/群聊大模型对话、思考模式切换、函数调用、永久记忆、多模型管理与按群/用户自定义脚本扩展。
 
-- 私聊：上下文多轮对话、图片识别、`/` 指令系统、函数调用（搜索/读网页/记忆管理）
+- 私聊：上下文多轮对话、空闲上下文压缩、图片识别、`/` 指令系统、函数调用（搜索/读网页/记忆管理）
 - 群聊：@机器人触发回复、闲时自动回复、聊天记录管理、OCR、语音转文字、合并转发解析
 - 多协议模型接入：chat-completions / responses / anthropic 三种 API 统一封装，流式输出
 
 ## 系统架构
 
 - **通信层**：QQ 消息由 NapCat（OneBot v11 协议）接收。NapCat 作为 WebSocket 客户端主动连入本程序的 `ws://0.0.0.0:8080`（main.py 为服务端），上行推送消息、下行发送动作；辅助信息拉取（get_stranger_info / get_msg / get_file / fetch_ptt_text 等）则由本程序 POST 到 NapCat 的 HTTP 服务器 `http://127.0.0.1:3001`。
-- **处理层**：模块导入链单向为 `main.py` → `user_functions.py` → `handlers.py` → `custom_functions.py` → `base_settings.py`，各层靠 `import *` 共享全局状态（`users` / `groups` 字典、`logger`、`MODELS`、`API` 等）。收到的每条群/私聊消息在独立协程中处理，用每群/每用户锁串行化；出站消息经全局锁加 0.05s 延迟投递防乱序。
+- **处理层**：模块导入链单向为 `main.py` → `user_functions.py` → `handlers.py` → `custom_functions.py` → `base_settings.py`，各层靠 `import *` 共享全局状态（`users` / `groups` 字典、`logger`、`MODELS`、`API` 等）。收到的每条群/私聊消息在独立协程中处理；默认配置脚本在 `hook_init` 里为每个群/用户实例创建 `self.lock`，消息处理、用户输入状态与群闲置回复都在锁内串行（自定义脚本必须自己加锁，框架不再提供），出站消息另经全局锁加 0.05s 延迟投递防乱序。
 - **远程 API**：OCR、网页搜索、网页阅读、B站/网易云解析、好友邀请验证、网页聊天等能力依赖独立部署的 [BingScraperApi](https://github.com/A8Cl233395/BingScraperApi) 远程服务，启动时校验其可用性（`/status` 要求 `version == "8"`），且启用的功能必须与服务能力匹配，否则直接退出。
 - **记忆同步**：私聊记忆通过 Sync 类经 `REMOTE_WEBSOCKET_URI` 与远程 API 双向同步，断线期间积压至 `data/desynchronized.json`，重连后全量推送；`data/dirty/{id}` 标记崩溃后待回拉的用户。
 
@@ -84,7 +84,7 @@ deepseek-v4-flash:
 按 QQ 号/群号命名的 `{id}.yaml` 会浅覆盖（dict.update）同名默认项。
 
 - **群组默认配置**：`NAME`（机器人昵称）、`PROMPT`（提示词）、`MODEL`、`IDLE_REPLY_TIME`（秒，0 关闭闲时回复）、`MAX_HISTORY` / `EXTENDED_MAX_HISTORY`（聊天记录条数上限）
-- **用户默认配置**：`MODEL` / `VISION_MODEL` / `COMMAND_CHECK_MODEL`、`ENABLE_FUNCTION_DEFAULT` / `ENABLE_THINKING_DEFAULT`、`COMMAND_CHECK_PROMPT`（`/` 指令意图分类提示词）、`CHAT_PROMPT_RAW`（聊天人设，占位符 `{memory_block}` / `{time}` / `{device}`）
+- **用户默认配置**：`MODEL` / `VISION_MODEL` / `COMMAND_CHECK_MODEL`、`ENABLE_FUNCTION_DEFAULT` / `ENABLE_THINKING_DEFAULT`、`COMMAND_CHECK_PROMPT`（`/` 指令意图分类提示词）、`CHAT_PROMPT_RAW`（聊天人设，占位符 `{memory_block}` / `{time}`）
 
 ### 自定义脚本 configs/{groups,users}/{id}.py
 
@@ -108,6 +108,8 @@ async def hook_on_quit(self):
 
 `self.send_message(text)` 发送消息；发送内容可用 `[CQ:at,qq=...]` 等码。
 
+> 并发提示：框架不再按群号/QQ号加锁。自定义脚本需在 `hook_init` 里自建 `self.lock = asyncio.Lock()`，并在 `hook_on_message_receive` / `hook_on_input`（以及自己起的后台任务）里用 `async with self.lock:` 串行化，否则会与聊天/后台任务并发修改同一份实例状态。
+
 ### 运行时状态 data/
 
 - `data/users/{user_id}.json`：私聊用户的 `thinking` / `enable_function` / `memory`，退出时由 `hook_on_quit` 写入
@@ -130,7 +132,16 @@ async def hook_on_quit(self):
 - `readURL(url)` —— 读网页，域名特判自动转用 B站视频解析 / 网易云歌词解析
 - `manageMemory(operation, memory)` —— 管理 AI 调用的永久记忆并跨设备同步；单条 ≤500 字符，最多 50 条
 
-> 新增工具需同步修改 5 处：`user_functions.py` 中 `UserChat.tools` / `responses_tools` / `anthropic_tools`（三套 schema）、`_handle_tool_call`（执行逻辑）、`_tool_call_json_parser`（流式展示）。
+> 新增工具需同步修改 6 处：`user_functions.py` 中 `UserChat.tools` / `responses_tools` / `anthropic_tools`（三套 schema）、`_handle_tool_call`（执行逻辑）、`_tool_call_json_parser`（流式展示）、`toolname_to_text`（流式展示文案，未知工具回落到 `nonExist`）。
+
+### 空闲上下文压缩
+
+私聊超过 1700s 没有新消息时，后台 watcher 会在持有用户锁的情况下调用一次模型，把当前上下文总结成一条 assistant 摘要，作为新上下文的起点；同时标记 `reminder_state`，用户下次输入时会收到「聊聊新话题~」。
+
+- 摘要通过 `clear(last_message)` 保留为「假的 user 提问 + assistant 摘要」两条消息，这样三种协议下都不会出现首条消息不是 user 的问题。
+- 压缩沿用用户当前的思考模式与函数调用开关；触发提示词只声明「最后一条不带函数调用的回复会被保留」，即允许模型先调工具（如 `manageMemory`/`searchWeb`）再给总结。
+- 压缩失败（超时、模型报错等）时直接清空上下文，效果等同旧的 1700s 清空行为。
+- watcher 每个用户只保留一个，压缩成功后自行退出并在 `finally` 里把 `self.watcher` 置空，下一条消息结束后重新计时；`hook_on_quit` 中会 `cancel` 并 `await` 它退出。
 
 ### 错误恢复
 
@@ -144,7 +155,7 @@ QQBot/
 ├── base_settings.py       # 日志、base.yaml 加载、启动时远程 API 校验
 ├── custom_functions.py    # API/NapcatAPI/Utils/Bigmodel/协议转换与流式事件归一化等基础能力
 ├── handlers.py            # NapCat 消息分发、群/用户处理器、好友申请验证
-├── user_functions.py      # UserChat 流式对话、函数调用、Sync 记忆同步
+├── user_functions.py      # UserChat 流式对话、函数调用、空闲上下文压缩、Sync 记忆同步
 ├── configs/
 │   ├── base-template.yaml # 主配置模板（复制为 base.yaml）
 │   ├── groups/            # default.yaml/default.py + {群号}.yaml/.py

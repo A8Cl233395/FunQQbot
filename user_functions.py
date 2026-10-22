@@ -3,9 +3,10 @@ from pathlib import Path
 from handlers import *
 
 class UserChat:
-    # 陷阱：新增函数调用工具必须同步修改 5 处——
+    # 陷阱：新增函数调用工具必须同步修改 6 处——
     # tools / responses_tools / anthropic_tools（三套 schema）、_handle_tool_call（执行）、
-    # _tool_call_json_parser（流式展示）；漏改会导致某种协议下工具不可用或展示报错。
+    # _tool_call_json_parser（流式展示）、toolname_to_text（流式展示文案）；
+    # 漏改会导致某种协议下工具不可用、展示报错或只显示 nonExist 兜底文案。
     tools = [
         {
             "type": "function",
@@ -165,21 +166,28 @@ class UserChat:
             },
         }
     ]
+    toolname_to_text = {
+        "readURL": "*正在查看网页...",
+        "searchWeb": "*正在进行搜索...",
+        "manageMemory": "*正在修改记忆...",
+        "nonExist": "*我不知道我在干什么:P"
+    }
     def __init__(self, userdata: UserData):
         self.userdata = userdata
         self.oclient = Utils.oclient(userdata.model)
         self.vision_oclient = Utils.oclient(userdata.vision_model)
         self.clear()
     
-    def clear(self):
+    def clear(self, last_message: dict | None = None):
         self.messages = [{"role": "system", "content": self._build_system_message()}]
+        if last_message:
+            self.messages.append({"role": "user", "content": "Where're we so far?"})
+            self.messages.append(last_message)
         self.contain_image = False
 
     def _build_system_message(self):
         # HIGHWAY TO HELL
-        # CHAT_PROMPT_RAW 必须能 format 这三个占位符：{memory_block} / {time} / {device}；
-        # 自定义提示词里多写花括号会触发 KeyError。
-        return self.userdata.prompt_raw.format(memory_block=("\n".join(f"- {p}" if i == 0 else f"  {p}" for item in self.userdata.memory for i, p in enumerate(item.split("\n")))) if self.userdata.memory else "暂无记忆", device="QQ（使用纯文本，不使用LaTeX和表格等）", time=datetime.now().strftime("%Y-%m-%d %A"))
+        return self.userdata.prompt_raw.format(memory_block=("\n".join(f"- {p}" if i == 0 else f"  {p}" for item in self.userdata.memory for i, p in enumerate(item.split("\n")))) if self.userdata.memory else "暂无记忆", time=datetime.now().strftime("%Y-%m-%d %A"))
     
     async def _stream_events(self, model, thinking, enable_function):
         """三种协议（chat-completions / responses / anthropic）归一化后的流式事件，chat-completions 为主要格式"""
@@ -293,7 +301,7 @@ class UserChat:
                         if index is not None:
                             yield StreamEvent("tool_args", index=index, text=event.delta.partial_json)
     
-    async def __call__(self):
+    async def __call__(self, _raise_exception_out = False):
         model = self.userdata.vision_model if self.contain_image else self.userdata.model
         thinking = self.userdata.thinking
         enable_function = self.userdata.enable_function
@@ -320,7 +328,7 @@ class UserChat:
                         yield buffer.strip()
                         buffer = ""
                     if tool_calls: # 处理旧的（完成生成的）tool call
-                        yield self._tool_call_json_parser(tool_calls[-1])
+                        # yield self._tool_call_json_parser(tool_calls[-1])
                         tool_responses.append(await self._handle_tool_call(tool_calls[-1]))
                     if ev.index is not None:
                         while len(tool_calls) <= ev.index:
@@ -342,7 +350,7 @@ class UserChat:
                             },
                             "type": "function",
                         })
-                    yield f"---Tool Call: {ev.name}---" if ev.name else "---Tool Call---"
+                    yield self.toolname_to_text[ev.name] if ev.name in self.toolname_to_text else self.toolname_to_text["nonExist"]
                 elif ev.kind == "tool_args":
                     if ev.index is not None:
                         tool_calls[ev.index]["function"]["arguments"] += ev.text
@@ -356,17 +364,19 @@ class UserChat:
                     self.messages[-1]["reasoning_content"] = reasoning_content
             else:
                 # 处理最后一个tool call
-                yield self._tool_call_json_parser(tool_calls[-1])
+                # yield self._tool_call_json_parser(tool_calls[-1])
                 tool_responses.append(await self._handle_tool_call(tool_calls[-1]))
                 self.messages.append({"role": "assistant", "content": answering_content, "tool_calls": tool_calls})
                 if is_thinking:
                     self.messages[-1]["reasoning_content"] = reasoning_content
                 self.messages.extend(tool_responses)
-                async for item in self.__call__(): # 直到ai完成所有操作
+                async for item in self.__call__(_raise_exception_out=_raise_exception_out): # 直到ai完成所有操作
                     yield item
         except Exception as e:
             # 陷阱：出错时把本回合消息回滚到最后一条 user 之前，会丢弃已经流式输出的 assistant/tool 消息，
             # 这是预期行为；排查时不要误以为消息丢失是裁剪逻辑导致。
+            if _raise_exception_out:
+                raise e
             id = os.urandom(4).hex()
             yield f"---Error ! Trace id: {id}---"
             logger.exception(f"Error in {id}: {str(e)}")
@@ -420,20 +430,20 @@ class UserChat:
             "tool_call_id": tool_call_id,
         }
     
-    def _tool_call_json_parser(self, tool_call: dict):
-        try:
-            arguments_json = json.loads(tool_call["function"]["arguments"])
-        except json.JSONDecodeError:
-            return f"错误：不是一个有效的JSON字符串！"
-        match tool_call["function"]["name"]:
-            case "readURL":
-                return f"URL: {arguments_json['url']}"
-            case "searchWeb":
-                return f"查询: {arguments_json['query']}"
-            case "manageMemory":
-                return f"操作: {arguments_json['operation']}\n记忆: {arguments_json['memory']}"
-            case _:
-                return f"错误：未知的函数名：{tool_call['function']['name']}！"
+    # def _tool_call_json_parser(self, tool_call: dict):
+    #     try:
+    #         arguments_json = json.loads(tool_call["function"]["arguments"])
+    #     except json.JSONDecodeError:
+    #         return f"错误：不是一个有效的JSON字符串！"
+    #     match tool_call["function"]["name"]:
+    #         case "readURL":
+    #             return f"URL: {arguments_json['url']}"
+    #         case "searchWeb":
+    #             return f"查询: {arguments_json['query']}"
+    #         case "manageMemory":
+    #             return f"操作: {arguments_json['operation']}\n记忆: {arguments_json['memory']}"
+    #         case _:
+    #             return f"错误：未知的函数名：{tool_call['function']['name']}！"
 
     def add(self, content: dict):
         if not self.messages or self.messages[-1]["role"] != "user":
@@ -452,23 +462,21 @@ class UserChat:
             else:
                 image_messages.append(message)
         self.messages[-1]["content"] = image_messages + [{"type": "text", "text": "\n\n".join([i["text"] for i in text_messages])}]
-    
-    def crop(self, force: bool = False): # 当消息数量超过100时，裁剪到5个，包括一条系统消息
-        if force or len(self.messages) > 100:
-            self.messages.pop(0) # 移除系统消息
-            while len(self.messages) > 4:
-                self.messages.pop(0)
-                while self.messages and self.messages[0]["role"] != "user":
-                    self.messages.pop(0)
-            self.messages.insert(0, {"role": "system", "content": self._build_system_message()})
 
-            self.contain_image = False
-            for message in self.messages:
-                if message["role"] == "user":
-                    for item in message["content"]:
-                        if item["type"] == "image_url":
-                            self.contain_image = True
-                            break
+    async def compact(self):
+        self.messages.append({"role": "user", "content": '''[SYSTEM — automatic trigger]
+The user has been idle for a long time.
+Write a handoff summary of the conversation so far.
+Your last message without function call will be preserved.'''})
+        try:
+            async for _ in self.__call__(_raise_exception_out = True):
+                pass
+            last_message = self.messages[-1]
+            logger.debug(f"压缩成功：{str(last_message)}")
+            self.clear(last_message)
+        except Exception as e:
+            logger.exception("在压缩用户上下文时出现错误")
+            self.clear() # 强制清空
 
 class Sync:
     # 陷阱：

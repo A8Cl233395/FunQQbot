@@ -1,8 +1,9 @@
 from handlers import *
+import re
 
 # 陷阱：
-# - 本文件靠 `from handlers import *` 间接取得依赖，但整条导入链没有任何模块导入 re；
-#   ai_reply 里的 re.sub 会抛 NameError。改 @ 提及时请在此显式 `import re`。
+# - 本文件靠 `from handlers import *` 间接取得依赖；导入链里没有 re，ai_reply 的 re.sub 依赖文件顶部的 `import re`，不要删。
+# - `self.lock` 由本脚本在 hook_init 里创建，消息处理与闲置回复都靠它串行；框架不再提供群锁，自定义脚本必须自己加锁。
 # - 群配置在处理器首次实例化时读取一次，运行期修改 YAML 无效。
 # - 只有被 @ 或开启 IDLE_REPLY_TIME 后闲置才会调用大模型；普通消息只进入聊天记录。
 
@@ -16,38 +17,41 @@ async def hook_init(self: Handle_group_message, config: dict):
     self.model = config["MODEL"]
     self.max_history = config["MAX_HISTORY"]
     self.extended_max_history = config["EXTENDED_MAX_HISTORY"]
-    if self.idle_reply_time:
-        self.idle_task = asyncio.create_task(check_idle(self))
     self.bot_sent = False
     self.stored_messages = []
+    self.lock = asyncio.Lock()
+    # 陷阱：check_idle 会用到上面所有状态（尤其是 self.lock），必须最后再起任务。
+    if self.idle_reply_time:
+        self.idle_task = asyncio.create_task(check_idle(self))
 
 async def hook_on_message_receive(self: Handle_group_message, messages):
-    time_to_last = time.time() - self.last_time
-    if time_to_last > 3600: # 超过1小时清理
-        self.delete = True
-        self.stored_messages = ["<时间过长，聊天记录已清理>"]
-    elif time_to_last > 120: # 超过2分钟标记
-        self.delete = True
-        self.stored_messages.append("<时间间隔长>")
-    self.bot_sent = False
-    self.last_time = time.time() # 更新最后聊天时间
-    if self.delete:
-        self.stored_messages = self.stored_messages[-self.max_history:]
-    elif len(self.stored_messages) > self.extended_max_history:
-        logger.info("群 %s 聊天记录超过 %s 条，清理到 %s 条", self.group_id, self.extended_max_history, self.max_history)
-        self.delete = True
-        self.stored_messages = self.stored_messages[-self.max_history:]
-    text, plain_text, is_mentioned = await messages_to_text(messages, self.name)
-    self.stored_messages.append(text)
-    if is_mentioned:
-        self.delete = False
-        result = await ai_reply(self)
-        for i in result:
-            if type(i) == tuple:
-                self.stored_messages.append(f"{self.name}: {i[0]}")
-                await self.send_message(i[1])
-            else:
-                await self.send_message(i)
+    async with self.lock:
+        time_to_last = time.time() - self.last_time
+        if time_to_last > 3600: # 超过1小时清理
+            self.delete = True
+            self.stored_messages = ["<时间过长，聊天记录已清理>"]
+        elif time_to_last > 120: # 超过2分钟标记
+            self.delete = True
+            self.stored_messages.append("<时间间隔长>")
+        self.bot_sent = False
+        self.last_time = time.time() # 更新最后聊天时间
+        if self.delete:
+            self.stored_messages = self.stored_messages[-self.max_history:]
+        elif len(self.stored_messages) > self.extended_max_history:
+            logger.info("群 %s 聊天记录超过 %s 条，清理到 %s 条", self.group_id, self.extended_max_history, self.max_history)
+            self.delete = True
+            self.stored_messages = self.stored_messages[-self.max_history:]
+        text, plain_text, is_mentioned = await messages_to_text(messages, self.name)
+        self.stored_messages.append(text)
+        if is_mentioned:
+            self.delete = False
+            result = await ai_reply(self)
+            for i in result:
+                if type(i) == tuple:
+                    self.stored_messages.append(f"{self.name}: {i[0]}")
+                    await self.send_message(i[1])
+                else:
+                    await self.send_message(i)
 
 async def hook_on_quit(self: Handle_group_message):
     # self.config # 当前群组配置 dict
@@ -165,14 +169,15 @@ async def check_idle(self: Handle_group_message):
     sleep_time = max(self.idle_reply_time / 5, 10)
     while True:
         await asyncio.sleep(sleep_time)
-        if time.time() - self.last_time > self.idle_reply_time and not self.bot_sent:
-            for i in await ai_reply(self):
-                if type(i) == tuple:
-                    self.stored_messages.append(f"{self.name}: {i[0]}")
-                    to_user = i[1]
-                else:
-                    to_user = i
-                await self.send_message(to_user)
-            self.bot_sent = True
-            self.delete = False
-            self.last_time = time.time()  # 重置最后聊天时间
+        async with self.lock:
+            if time.time() - self.last_time > self.idle_reply_time and not self.bot_sent:
+                for i in await ai_reply(self):
+                    if type(i) == tuple:
+                        self.stored_messages.append(f"{self.name}: {i[0]}")
+                        to_user = i[1]
+                    else:
+                        to_user = i
+                    await self.send_message(to_user)
+                self.bot_sent = True
+                self.delete = False
+                self.last_time = time.time()  # 重置最后聊天时间

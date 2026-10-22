@@ -197,9 +197,6 @@ class Handle_friend_request:
         }, ensure_ascii=False)
         await push_to_websocket(response_json)
 
-user_locks: dict[int, asyncio.Lock] = {}
-group_locks: dict[int, asyncio.Lock] = {}
-# 陷阱：每条群/私聊消息在独立协程中处理，但按群号/QQ号用对应锁串行化，不要绕过锁直接调 on_receive_message。
 groups: dict[int, Handle_group_message] = {}
 users: dict[int, Handle_private_message] = {}
 user_last_input_time: dict[int, float] = {}
@@ -211,7 +208,6 @@ async def init_user(user_id: int):
     logger.debug("Init user: %s", user_id)
     users[user_id] = Handle_private_message(user_id)
     await users[user_id].initialize_custom_module()
-    user_locks[user_id] = asyncio.Lock()
     user_last_input_time[user_id] = time.time() # 初始化上次输入时间
 
 async def push_to_websocket(message):
@@ -266,15 +262,12 @@ async def _group_message_receive_handler(messages, group_id):
     if group_id not in groups:
         groups[group_id] = Handle_group_message(group_id)
         await groups[group_id].initialize_custom_module()
-        group_locks[group_id] = asyncio.Lock()
-    async with group_locks[group_id]:
-        await groups[group_id].on_receive_message(messages)
+    await groups[group_id].on_receive_message(messages)
 
 async def _private_message_receive_handler(messages, user_id):
     if user_id not in users:
         await init_user(user_id)
-    async with user_locks[user_id]:
-        await users[user_id].on_receive_message(messages)
+    await users[user_id].on_receive_message(messages)
 
 async def _private_message_on_input_handler(user_id):
     if user_id not in users:
@@ -282,5 +275,4 @@ async def _private_message_on_input_handler(user_id):
     if time.time() - user_last_input_time[user_id] < 5:
         return # 上次输入时间小于5秒，忽略
     user_last_input_time[user_id] = time.time() # 更新上次输入时间
-    async with user_locks[user_id]:
-        await users[user_id].on_input()
+    await users[user_id].on_input()
