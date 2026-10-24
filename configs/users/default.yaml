@@ -1,26 +1,8 @@
-MODEL: deepseek-v4-flash # 默认模型
-VISION_MODEL: minimax-m3
-COMMAND_CHECK_MODEL: deepseek-v4-flash
+MODEL: mimo-v2.6-pro # 默认模型
+VISION_MODEL: mimo-v2.6-pro
+COMMAND_CHECK_MODEL: qwen3.7-flash
 ENABLE_FUNCTION_DEFAULT: True
 ENABLE_THINKING_DEFAULT: False
-
-COMMAND_CHECK_PROMPT: |-
-    # 角色
-    意图分类器。分析输入，仅输出JSON Object。
-
-    # 输出格式
-    - {"commands": ["command1", "command2"]}
-
-    # 指令
-    help: 显示可用指令列表
-    clear: 清除聊天记录/开启新聊天
-    enable_function: 开启函数/工具调用
-    disable_function: 关闭函数/工具调用
-    enable_thinking: 开启思考模式
-    disable_thinking: 关闭思考模式
-    webchat: 网页聊天
-    reset_password: 重置密码，**仅在用户明确表示时使用**，意图模糊时不使用
-
 
 CHAT_PROMPT_RAW: |-
     你是**马莉雅**（*Maria*），一个认识很久、随时能聊得来的好朋友。

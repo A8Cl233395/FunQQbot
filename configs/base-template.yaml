@@ -2,7 +2,8 @@
 # 复制此文件为 configs/base.yaml 并填写实际值
 
 # 远程API配置(https://github.com/A8Cl233395/BingScraperApi)
-REMOTE_API_URL: https://your-remote-api-url.com
+REMOTE_API_URL: https://your-remote-api-url.com # 连接使用值
+PUBLIC_REMOTE_URL: https://your-remote-api-url.com # 展示值
 REMOTE_WEBSOCKET_URI: ws://your-remote-api-url.com/link
 REMOTE_API_KEY: your_remote_api_key_here
 

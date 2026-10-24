@@ -429,21 +429,6 @@ class UserChat:
             "content": content,
             "tool_call_id": tool_call_id,
         }
-    
-    # def _tool_call_json_parser(self, tool_call: dict):
-    #     try:
-    #         arguments_json = json.loads(tool_call["function"]["arguments"])
-    #     except json.JSONDecodeError:
-    #         return f"错误：不是一个有效的JSON字符串！"
-    #     match tool_call["function"]["name"]:
-    #         case "readURL":
-    #             return f"URL: {arguments_json['url']}"
-    #         case "searchWeb":
-    #             return f"查询: {arguments_json['query']}"
-    #         case "manageMemory":
-    #             return f"操作: {arguments_json['operation']}\n记忆: {arguments_json['memory']}"
-    #         case _:
-    #             return f"错误：未知的函数名：{tool_call['function']['name']}！"
 
     def add(self, content: dict):
         if not self.messages or self.messages[-1]["role"] != "user":

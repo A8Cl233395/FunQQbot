@@ -29,6 +29,7 @@ with open("configs/base.yaml", encoding="utf-8") as f:
     base_config = yaml.safe_load(f)
 del f
 REMOTE_API_URL: str = base_config["REMOTE_API_URL"]
+PUBLIC_REMOTE_URL: str = base_config["PUBLIC_REMOTE_URL"]
 REMOTE_WEBSOCKET_URI: str = base_config["REMOTE_WEBSOCKET_URI"]
 REMOTE_API_KEY: str = base_config["REMOTE_API_KEY"]
 ENABLE_OCR: bool = base_config["ENABLE_OCR"]

@@ -11,7 +11,6 @@ from user_functions import *
 
 async def hook_init(self: "Handle_private_message", config: dict):
     # self.config # 当前用户配置 dict
-    self.command_check_prompt = config["COMMAND_CHECK_PROMPT"]
     if not os.path.exists(f"data/users/{self.user_id}.json"):
         data = {
             "thinking": config["ENABLE_THINKING_DEFAULT"],
@@ -57,7 +56,23 @@ async def hook_on_message_receive(self: Handle_private_message, data):
     async with self.lock:
         plain_text = process_first_message_text(data)
         if plain_text.startswith("/"):
-            commands = await Bigmodel.ask_ai_json(self.command_check_prompt, plain_text[1:], model=self.command_check_model)
+            prompt = '''# 角色
+意图分类器。分析输入，仅输出JSON Object。
+
+# 输出格式
+- {"commands": ["command1", "command2"]}
+
+# 指令
+help: 显示可用指令列表
+clear: 清除聊天记录/开启新聊天
+compress: 压缩当前聊天
+enable_function: 开启函数/工具调用
+disable_function: 关闭函数/工具调用
+enable_thinking: 开启思考模式
+disable_thinking: 关闭思考模式
+webchat: 返回聊天网页地址
+reset_password: 重置密码，**仅在用户明确表示时使用**，意图模糊时不使用'''
+            commands = await Bigmodel.ask_ai_json(prompt, plain_text[1:], model=self.command_check_model)
             try:
                 commands: dict = json.loads(commands)
                 if len(commands["commands"]) == 0:
@@ -68,6 +83,10 @@ async def hook_on_message_receive(self: Handle_private_message, data):
                             case "clear":
                                 self.chat_instance.clear()
                                 await self.send_message("聊天记录已清除")
+                            case "compress":
+                                await self.send_message("正在压缩，请稍后...")
+                                await self.chat_instance.compact()
+                                await self.send_message("已压缩")
                             case "enable_function":
                                 self.user_data.enable_function = True
                                 await self.send_message("已开启函数调用")
@@ -86,8 +105,8 @@ async def hook_on_message_receive(self: Handle_private_message, data):
                                     if result:
                                         await self.send_message("第一次使用网页聊天？这是你的初始密码：")
                                         await self.send_message(result)
-                                    await self.send_message(f"你可以前往 {REMOTE_API_URL}/webchat 进行网页版聊天")
-                                    await self.send_message("如果需要重置，请发送 \"重置密码\"")
+                                    await self.send_message(f"你可以前往 {PUBLIC_REMOTE_URL}/webchat 进行网页版聊天")
+                                    await self.send_message("如果需要重置，请发送 /\"重置密码\"")
                             case "reset_password":
                                 if ALLOW_WEBCHAT:
                                     result = await API.reset_webchat_password(self.user_id)
