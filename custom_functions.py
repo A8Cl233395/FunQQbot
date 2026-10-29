@@ -6,11 +6,15 @@ from anthropic.types import (
     ContentBlockDeltaEvent,
     ContentBlockStartEvent,
     InputJSONDelta,
+    RedactedThinkingBlock,
+    SignatureDelta,
     TextBlock,
     TextDelta,
+    ThinkingBlock,
     ThinkingDelta,
     ToolUseBlock,
 )
+from typing import Any
 from PIL import Image
 from io import BytesIO
 from dataclasses import dataclass
@@ -92,21 +96,29 @@ class LRUCache:
 @dataclass
 class StreamEvent:
     """三种协议（chat-completions / responses / anthropic）归一化后的流式事件"""
-    kind: str  # "thinking" | "content" | "tool_start" | "tool_args"
+    kind: str  # "thinking" | "content" | "tool_start" | "tool_args" | "thinking_block" | "signature" | "redacted" | "reasoning_item"
     text: str = ""
     index: int | None = None
     call_id: str | None = None
     name: str | None = None
+    payload: Any = None  # redacted 的密文 / reasoning_item 的原生回放对象（id/summary/encrypted_content）
 
-def prepare_responses_messages(messages: list) -> tuple[str, list]:
+def prepare_responses_messages(messages: list, model: str | None = None, thinking: bool = False) -> tuple[str, list]:
     """
     将内部 OpenAI 格式消息转换为 responses API 输入格式
-    system 消息拆出为 instructions；工具调用和工具结果转为顶层 input item
+    system 消息拆出为 instructions；工具调用和工具结果转为顶层 input item；
+    同模型的 encrypted_content 回放为 reasoning item（需要传 model/thinking，不传则不回放）
     """
     instructions = messages[0]["content"]
     input_messages = []
     for msg in messages[1:]:
+        # 思考凭据只在思考开启且模型一致时原样展开回放（blob 为原生对象列表，兼容旧单对象格式）
+        blob = msg.get("reasoning_blob")
+        replay_items: list[dict] = []
+        if blob and thinking and model is not None and msg.get("reasoning_model") == model:
+            replay_items = [dict(blob)] if isinstance(blob, dict) else [dict(b) for b in blob]
         if msg["role"] == "assistant" and msg.get("tool_calls"):
+            input_messages.extend(replay_items)
             if msg.get("content"):
                 input_messages.append({"role": "assistant", "content": msg["content"]})
             input_messages.extend(
@@ -125,6 +137,7 @@ def prepare_responses_messages(messages: list) -> tuple[str, list]:
                 "output": msg["content"],
             })
         elif msg["role"] == "assistant":
+            input_messages.extend(replay_items)
             input_messages.append({"role": "assistant", "content": msg.get("content") or ""})
         elif isinstance(msg["content"], list):
             content = []
@@ -138,11 +151,12 @@ def prepare_responses_messages(messages: list) -> tuple[str, list]:
             input_messages.append({"role": msg["role"], "content": msg["content"]})
     return instructions, input_messages
 
-def prepare_anthropic_messages(messages: list) -> tuple[list, list]:
+def prepare_anthropic_messages(messages: list, model: str | None = None, thinking: bool = False) -> tuple[list, list]:
     """
     将内部 OpenAI 格式消息转换为 anthropic messages 输入格式
     system 消息拆出为顶层参数；image_url 转为 base64 image block；assistant 的 tool_calls 转为 tool_use block；
-    tool 消息合并为 user 消息的 tool_result block
+    tool 消息合并为 user 消息的 tool_result block；同模型的 thinking 块（带 signature）插到 assistant 内容最前
+    （需要传 model/thinking 才回放）
     """
     system = [{"type": "text", "text": messages[0]["content"]}]
     anthropic_messages = []
@@ -163,6 +177,11 @@ def prepare_anthropic_messages(messages: list) -> tuple[list, list]:
             continue
         if msg["role"] == "assistant" and msg.get("tool_calls"):
             content = []
+            # 思考凭据只在思考开启且模型一致时原样展开回放（blob 为原生块列表，兼容旧单对象格式）。
+            # thinking / redacted_thinking 块必须原样置于 tool_use 之前（signature 会被逐块校验）
+            blob = msg.get("reasoning_blob")
+            if blob and thinking and model is not None and msg.get("reasoning_model") == model:
+                content.extend(dict(b) for b in ([blob] if isinstance(blob, dict) else blob))
             if msg.get("content"):
                 content.append({"type": "text", "text": msg["content"]})
             for tc in msg["tool_calls"]:
